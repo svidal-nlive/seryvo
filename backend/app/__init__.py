@@ -1,0 +1,1 @@
+"""Seryvo Platform Backend Application"""

@@ -1,0 +1,63 @@
+# Seryvo Platform - Python Backend Dependencies
+# FastAPI + dependencies
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.17
+
+# Database
+sqlalchemy==2.0.36
+alembic==1.14.0
+asyncpg==0.30.0
+psycopg2-binary==2.9.10
+aiosqlite==0.20.0
+
+# File handling
+aiofiles==24.1.0
+
+# Auth
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.2.1
+
+# Validation & Serialization
+pydantic==2.10.3
+pydantic-settings==2.6.1
+email-validator==2.2.0
+
+# CORS & HTTP
+httpx==0.28.1
+
+# WebSockets
+websockets==13.1
+
+# Environment
+python-dotenv==1.0.1
+
+# Date/Time
+python-dateutil==2.9.0
+
+# ===========================================
+# Payment Processing - Stripe (TEST MODE FREE)
+# ===========================================
+stripe==11.4.1
+
+# ===========================================
+# Email Notifications - Resend (FREE TIER)
+# 3,000 emails/month free
+# ===========================================
+resend==2.7.0
+
+# ===========================================
+# Push Notifications - WebPush (FREE)
+# Uses standard Web Push API
+# ===========================================
+pywebpush==2.1.2
+py-vapid==1.9.2
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.24.0
+httpx==0.28.1
+
+# Production
+gunicorn==23.0.0
