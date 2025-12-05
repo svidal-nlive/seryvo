@@ -94,17 +94,20 @@ def upgrade() -> None:
     # ===========================================================================
     
     if column_exists('audit_logs', 'user_id'):
-        # Migrate data from user_id to actor_id if needed
-        op.execute("UPDATE audit_logs SET actor_id = user_id WHERE actor_id IS NULL AND user_id IS NOT NULL")
+        # Migrate data from user_id to actor_id if needed (only if actor_id exists)
+        if column_exists('audit_logs', 'actor_id'):
+            op.execute("UPDATE audit_logs SET actor_id = user_id WHERE actor_id IS NULL AND user_id IS NOT NULL")
         op.drop_column('audit_logs', 'user_id')
     
     if column_exists('audit_logs', 'old_values'):
-        # Migrate data
-        op.execute("UPDATE audit_logs SET old_value = old_values WHERE old_value IS NULL AND old_values IS NOT NULL")
+        # Migrate data (only if old_value exists)
+        if column_exists('audit_logs', 'old_value'):
+            op.execute("UPDATE audit_logs SET old_value = old_values WHERE old_value IS NULL AND old_values IS NOT NULL")
         op.drop_column('audit_logs', 'old_values')
     
     if column_exists('audit_logs', 'new_values'):
-        op.execute("UPDATE audit_logs SET new_value = new_values WHERE new_value IS NULL AND new_values IS NOT NULL")
+        if column_exists('audit_logs', 'new_value'):
+            op.execute("UPDATE audit_logs SET new_value = new_values WHERE new_value IS NULL AND new_values IS NOT NULL")
         op.drop_column('audit_logs', 'new_values')
     
     if column_exists('audit_logs', 'user_agent'):
