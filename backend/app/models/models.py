@@ -135,8 +135,16 @@ class DriverProfile(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     user: Mapped["User"] = relationship(back_populates="driver_profile")
-    vehicles: Mapped[List["Vehicle"]] = relationship(back_populates="driver")
-    documents: Mapped[List["DriverDocument"]] = relationship(back_populates="driver")
+    vehicles: Mapped[List["Vehicle"]] = relationship(
+        back_populates="driver",
+        foreign_keys="[Vehicle.driver_id]",
+        primaryjoin="DriverProfile.user_id == Vehicle.driver_id"
+    )
+    documents: Mapped[List["DriverDocument"]] = relationship(
+        back_populates="driver",
+        foreign_keys="[DriverDocument.driver_id]",
+        primaryjoin="DriverProfile.user_id == DriverDocument.driver_id"
+    )
 
 
 class SavedLocation(Base):
