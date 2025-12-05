@@ -1,13 +1,13 @@
 # Seryvo Platform - Docker Compose Configuration
 # 
 # Usage:
-#   Development (local):  docker compose up -d
-#   Production (Traefik): docker compose --profile production up -d
+#   Development (local):  docker compose --profile development up -d --build
+#   Production (Traefik): docker compose --profile production up -d --build
 #
 # Quick Start:
 #   1. cp .env.example .env
 #   2. Edit .env with your settings
-#   3. docker compose up -d --build
+#   3. docker compose --profile production up -d --build
 
 services:
   # ===========================================
@@ -63,10 +63,10 @@ services:
           memory: 64M
 
   # ===========================================
-  # APPLICATION SERVICES
+  # APPLICATION SERVICES (Development)
   # ===========================================
 
-  # Backend API (FastAPI)
+  # Backend API (FastAPI) - Development mode
   seryvo-backend:
     container_name: seryvo-backend
     build:
@@ -74,6 +74,8 @@ services:
       dockerfile: docker/Dockerfile.backend
     image: seryvo-backend:latest
     restart: unless-stopped
+    profiles:
+      - development
     environment:
       - DATABASE_URL=postgresql+asyncpg://${DB_USER:-seryvo}:${DB_PASSWORD}@seryvo-db:5432/${DB_NAME:-seryvo}
       - SECRET_KEY=${SECRET_KEY:?SECRET_KEY is required}
@@ -127,6 +129,8 @@ services:
         - VITE_WS_URL=${VITE_WS_URL:-ws://localhost:8000/ws}
     image: seryvo-frontend:latest
     restart: unless-stopped
+    profiles:
+      - development
     networks:
       - seryvo-public
     ports:
