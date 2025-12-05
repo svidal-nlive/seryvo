@@ -5,6 +5,7 @@ FROM node:20-alpine AS builder
 # Build arguments for environment variables
 ARG VITE_API_BASE_URL=http://localhost:8000/api/v1
 ARG VITE_WS_URL=ws://localhost:8000/ws
+ARG VITE_USE_REAL_API=true
 
 # Set working directory
 WORKDIR /app
@@ -21,6 +22,7 @@ COPY frontend/ ./
 # Set environment variables for build
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 ENV VITE_WS_URL=$VITE_WS_URL
+ENV VITE_USE_REAL_API=$VITE_USE_REAL_API
 
 # Build the application
 RUN npm run build
