@@ -127,6 +127,7 @@ services:
       args:
         - VITE_API_BASE_URL=${VITE_API_BASE_URL:-http://localhost:8000/api/v1}
         - VITE_WS_URL=${VITE_WS_URL:-ws://localhost:8000/ws}
+        - VITE_MAPBOX_ACCESS_TOKEN=${VITE_MAPBOX_ACCESS_TOKEN:-}
     image: seryvo-frontend:latest
     restart: unless-stopped
     profiles:
@@ -219,6 +220,7 @@ services:
         - VITE_API_BASE_URL=https://${DOMAIN:-seryvo.vectorhost.net}/api/v1
         - VITE_WS_URL=wss://${DOMAIN:-seryvo.vectorhost.net}/ws
         - VITE_USE_REAL_API=true
+        - VITE_MAPBOX_ACCESS_TOKEN=${VITE_MAPBOX_ACCESS_TOKEN:-}
     image: seryvo-frontend:latest
     restart: unless-stopped
     profiles:

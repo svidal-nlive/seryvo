@@ -6,6 +6,7 @@ FROM node:20-alpine AS builder
 ARG VITE_API_BASE_URL=http://localhost:8000/api/v1
 ARG VITE_WS_URL=ws://localhost:8000/ws
 ARG VITE_USE_REAL_API=true
+ARG VITE_MAPBOX_ACCESS_TOKEN
 
 # Set working directory
 WORKDIR /app
@@ -23,6 +24,7 @@ COPY frontend/ ./
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 ENV VITE_WS_URL=$VITE_WS_URL
 ENV VITE_USE_REAL_API=$VITE_USE_REAL_API
+ENV VITE_MAPBOX_ACCESS_TOKEN=$VITE_MAPBOX_ACCESS_TOKEN
 
 # Build the application
 RUN npm run build
