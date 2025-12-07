@@ -136,14 +136,16 @@ class DriverProfile(Base):
     
     user: Mapped["User"] = relationship(back_populates="driver_profile")
     vehicles: Mapped[List["Vehicle"]] = relationship(
+        "Vehicle",
         back_populates="driver",
-        foreign_keys="[Vehicle.driver_id]",
-        primaryjoin="DriverProfile.user_id == Vehicle.driver_id"
+        primaryjoin="DriverProfile.user_id == foreign(Vehicle.driver_id)",
+        viewonly=True
     )
     documents: Mapped[List["DriverDocument"]] = relationship(
+        "DriverDocument",
         back_populates="driver",
-        foreign_keys="[DriverDocument.driver_id]",
-        primaryjoin="DriverProfile.user_id == DriverDocument.driver_id"
+        primaryjoin="DriverProfile.user_id == foreign(DriverDocument.driver_id)",
+        viewonly=True
     )
 
 
@@ -185,7 +187,12 @@ class Vehicle(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
-    driver: Mapped["DriverProfile"] = relationship(back_populates="vehicles", foreign_keys=[driver_id], primaryjoin="Vehicle.driver_id == DriverProfile.user_id")
+    driver: Mapped["DriverProfile"] = relationship(
+        "DriverProfile",
+        back_populates="vehicles",
+        primaryjoin="foreign(Vehicle.driver_id) == DriverProfile.user_id",
+        viewonly=True
+    )
     service_type: Mapped[Optional["ServiceType"]] = relationship()
 
 
@@ -204,7 +211,12 @@ class DriverDocument(Base):
     rejection_reason: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
-    driver: Mapped["DriverProfile"] = relationship(back_populates="documents", foreign_keys=[driver_id], primaryjoin="DriverDocument.driver_id == DriverProfile.user_id")
+    driver: Mapped["DriverProfile"] = relationship(
+        "DriverProfile",
+        back_populates="documents",
+        primaryjoin="foreign(DriverDocument.driver_id) == DriverProfile.user_id",
+        viewonly=True
+    )
 
 
 # ===========================================

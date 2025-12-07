@@ -1,6 +1,6 @@
 """cleanup duplicate columns - finalize schema alignment
 
-Revision ID: 003
+Revision ID: 002
 Revises: 001
 Create Date: 2025-12-05
 
@@ -15,7 +15,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '003'
+revision: str = '002'
 down_revision: Union[str, None] = '001'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
