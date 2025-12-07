@@ -15,7 +15,8 @@ from app.core.dependencies import get_current_user, require_roles
 from app.core.security import hash_password, create_access_token
 from app.models import (
     User, Role, UserRole, DriverProfile, Booking, Payment, DriverPayout,
-    SurgeRule, PricingRule, Region, ServiceType, Promotion, AuditLog, Vehicle
+    SurgeRule, PricingRule, Region, ServiceType, Promotion, AuditLog, Vehicle,
+    PaymentMethod, ClientProfile
 )
 from app.schemas import (
     DashboardStats,
@@ -971,6 +972,72 @@ async def load_demo_data(
         existing = await db.execute(select(ServiceType).where(ServiceType.code == code))
         if not existing.scalar_one_or_none():
             db.add(ServiceType(code=code, name=name, description=desc, base_capacity=capacity, is_active=True))
+    
+    # Create payment methods for demo clients (so they can make bookings)
+    demo_cards = [
+        ("visa", "4242", 12, 2027, "pm_card_visa_demo"),
+        ("mastercard", "5555", 6, 2026, "pm_card_mastercard_demo"),
+        ("amex", "0005", 3, 2028, "pm_card_amex_demo"),
+    ]
+    
+    card_idx = 0
+    for user, role_name in created_users:
+        if role_name == "client":
+            # Check if payment method already exists
+            existing_pm = await db.execute(
+                select(PaymentMethod).where(PaymentMethod.user_id == user.id)
+            )
+            if not existing_pm.scalar_one_or_none():
+                card = demo_cards[card_idx % len(demo_cards)]
+                pm = PaymentMethod(
+                    user_id=user.id,
+                    method_type="card",
+                    brand=card[0],
+                    last_four=card[1],
+                    exp_month=card[2],
+                    exp_year=card[3],
+                    is_default=True,
+                    stripe_payment_method_id=card[4],
+                )
+                db.add(pm)
+                card_idx += 1
+            
+            # Also create client profile if missing
+            existing_profile = await db.execute(
+                select(ClientProfile).where(ClientProfile.user_id == user.id)
+            )
+            if not existing_profile.scalar_one_or_none():
+                client_profile = ClientProfile(
+                    user_id=user.id,
+                    default_currency="USD",
+                )
+                db.add(client_profile)
+    
+    # Also add payment methods for existing demo clients who don't have them
+    existing_demo_clients = await db.execute(
+        select(User).join(UserRole).join(Role).where(
+            User.email.like("%@seryvo.demo.net"),
+            Role.name == "client"
+        )
+    )
+    for client in existing_demo_clients.scalars().all():
+        existing_pm = await db.execute(
+            select(PaymentMethod).where(PaymentMethod.user_id == client.id)
+        )
+        if not existing_pm.scalar_one_or_none():
+            card = demo_cards[card_idx % len(demo_cards)]
+            pm = PaymentMethod(
+                user_id=client.id,
+                method_type="card",
+                brand=card[0],
+                last_four=card[1],
+                exp_month=card[2],
+                exp_year=card[3],
+                is_default=True,
+                stripe_payment_method_id=card[4],
+            )
+            db.add(pm)
+            card_idx += 1
     
     # Audit log
     audit_log = AuditLog(
