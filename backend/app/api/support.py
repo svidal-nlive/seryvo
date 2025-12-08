@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, require_roles
+from app.core.enums import TicketStatus
 from app.models import (
     User, SupportTicket, TicketMessage, Booking, AuditLog
 )
@@ -28,7 +29,7 @@ router = APIRouter(prefix="/support/tickets", tags=["Support"])
 
 
 # Role dependency for support-only endpoints
-require_support = require_roles(["admin", "support"])
+require_support = require_roles(["admin", "support_agent"])
 
 
 @router.post("", response_model=TicketResponse, status_code=status.HTTP_201_CREATED)
@@ -53,7 +54,7 @@ async def create_ticket(
             )
         # Check if user is related to the booking
         user_roles = [ur.role.name for ur in current_user.roles]
-        is_staff = any(r in ["admin", "support"] for r in user_roles)
+        is_staff = any(r in ["admin", "support_agent"] for r in user_roles)
         if not is_staff and booking.client_id != user_id and booking.driver_id != user_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -64,7 +65,7 @@ async def create_ticket(
         user_id=user_id,
         booking_id=request.booking_id,
         category=request.category,
-        status="open",
+        status=TicketStatus.OPEN.value,
         priority=request.priority,
         subject=request.subject,
         description=request.description
@@ -135,7 +136,7 @@ async def list_tickets(
     """List support tickets."""
     user_id = current_user.id
     user_roles = [ur.role.name for ur in current_user.roles]
-    is_staff = any(r in ["admin", "support"] for r in user_roles)
+    is_staff = any(r in ["admin", "support_agent"] for r in user_roles)
     
     query = select(SupportTicket)
     
@@ -247,7 +248,7 @@ async def get_ticket(
     """Get ticket details with messages."""
     user_id = current_user.id
     user_roles = [ur.role.name for ur in current_user.roles]
-    is_staff = any(r in ["admin", "support"] for r in user_roles)
+    is_staff = any(r in ["admin", "support_agent"] for r in user_roles)
     
     result = await db.execute(
         select(SupportTicket).where(SupportTicket.id == ticket_id)
@@ -463,7 +464,7 @@ async def add_ticket_message(
     """Add a message to a ticket."""
     user_id = current_user.id
     user_roles = [ur.role.name for ur in current_user.roles]
-    is_staff = any(r in ["admin", "support"] for r in user_roles)
+    is_staff = any(r in ["admin", "support_agent"] for r in user_roles)
     
     result = await db.execute(
         select(SupportTicket).where(SupportTicket.id == ticket_id)
@@ -495,8 +496,8 @@ async def add_ticket_message(
     db.add(message)
     
     # Reopen ticket if customer replies to closed ticket
-    if ticket.status == "closed" and ticket.user_id == user_id:
-        ticket.status = "open"
+    if ticket.status == TicketStatus.CLOSED.value and ticket.user_id == user_id:
+        ticket.status = TicketStatus.OPEN.value
     
     await db.commit()
     await db.refresh(message)
@@ -547,7 +548,7 @@ async def close_ticket(
             detail="Ticket not found"
         )
     
-    ticket.status = "closed"
+    ticket.status = TicketStatus.CLOSED.value
     ticket.resolved_at = datetime.utcnow()
     
     await db.commit()

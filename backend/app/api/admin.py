@@ -13,10 +13,10 @@ from pydantic import BaseModel, EmailStr
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, require_roles
 from app.core.security import hash_password, create_access_token
+from app.core.enums import Role as RoleEnum, BookingStatus
 from app.models import (
     User, Role, UserRole, DriverProfile, Booking, Payment, DriverPayout,
-    SurgeRule, PricingRule, Region, ServiceType, Promotion, AuditLog, Vehicle,
-    PaymentMethod, ClientProfile
+    SurgeRule, PricingRule, Region, ServiceType, Promotion, AuditLog, Vehicle
 )
 from app.schemas import (
     DashboardStats,
@@ -36,20 +36,15 @@ from app.schemas import (
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
 
-# Role mapping between API names and database names
-# Frontend/API uses 'support_agent', database uses 'support'
+# Use centralized role mapping from enums module
 def map_role_to_db(role: str) -> str:
     """Map API role name to database role name."""
-    if role == "support_agent":
-        return "support"
-    return role
+    return RoleEnum.to_db(role)
 
 
 def map_role_from_db(role: str) -> str:
     """Map database role name to API role name."""
-    if role == "support":
-        return "support_agent"
-    return role
+    return RoleEnum.to_frontend(role)
 
 
 # Request/Response schemas for user provisioning
@@ -137,19 +132,19 @@ async def get_dashboard_stats(
     
     pending_bookings_result = await db.execute(
         select(func.count()).select_from(Booking).where(
-            Booking.status.in_(["pending", "searching", "accepted"])
+            Booking.status.in_(BookingStatus.active_statuses())
         )
     )
     pending_bookings = pending_bookings_result.scalar() or 0
     
     completed_bookings_result = await db.execute(
-        select(func.count()).select_from(Booking).where(Booking.status == "completed")
+        select(func.count()).select_from(Booking).where(Booking.status == BookingStatus.COMPLETED.value)
     )
     completed_bookings = completed_bookings_result.scalar() or 0
     
     # Total revenue
     revenue_result = await db.execute(
-        select(func.sum(Booking.final_fare)).where(Booking.status == "completed")
+        select(func.sum(Booking.final_fare)).where(Booking.status == BookingStatus.COMPLETED.value)
     )
     total_revenue = float(revenue_result.scalar() or 0)
     
@@ -589,7 +584,7 @@ async def list_pending_drivers(
     result = await db.execute(
         select(User)
         .join(DriverProfile, DriverProfile.user_id == User.id)
-        .where(DriverProfile.status == "pending")
+        .where(DriverProfile.status == "pending_verification")
     )
     users = result.scalars().all()
     
@@ -623,7 +618,7 @@ async def approve_driver(
             detail="Driver profile not found"
         )
     
-    profile.status = "approved"
+    profile.status = "active"
     
     # Audit log
     audit_log = AuditLog(
@@ -737,13 +732,12 @@ async def get_fleet_status(
             Vehicle.driver_id == User.id,
             Vehicle.status == "active"
         ))
-        .where(DriverProfile.status == "approved")
+        .where(DriverProfile.status == "active")
     )
     drivers_data = drivers_result.all()
     
     # Get all active bookings (not completed or cancelled)
-    active_statuses = ["requested", "accepted", "driver_assigned", "driver_en_route_pickup", 
-                       "driver_arrived", "in_progress", "searching"]
+    active_statuses = BookingStatus.active_statuses()
     bookings_result = await db.execute(
         select(Booking, User)
         .join(User, User.id == Booking.client_id)
@@ -904,7 +898,7 @@ async def load_demo_data(
         ("mike@seryvo.demo.net", "Mike Driver", "driver", "+1555000010"),
         ("sarah@seryvo.demo.net", "Sarah Wheeler", "driver", "+1555000011"),
         ("tom@seryvo.demo.net", "Tom Cruise", "driver", "+1555000012"),
-        ("support1@seryvo.demo.net", "Support Agent", "support", "+1555000020"),
+        ("support1@seryvo.demo.net", "Support Agent", "support_agent", "+1555000020"),
     ]
     
     for email, name, role_name, phone in demo_users_data:
@@ -939,7 +933,7 @@ async def load_demo_data(
             if not existing_profile.scalar_one_or_none():
                 profile = DriverProfile(
                     user_id=user.id,
-                    status="approved",
+                    status="active",
                     availability_status="available",
                     rating_average=round(random.uniform(4.5, 5.0), 1),
                     total_ratings=random.randint(50, 200),
@@ -972,72 +966,6 @@ async def load_demo_data(
         existing = await db.execute(select(ServiceType).where(ServiceType.code == code))
         if not existing.scalar_one_or_none():
             db.add(ServiceType(code=code, name=name, description=desc, base_capacity=capacity, is_active=True))
-    
-    # Create payment methods for demo clients (so they can make bookings)
-    demo_cards = [
-        ("visa", "4242", 12, 2027, "pm_card_visa_demo"),
-        ("mastercard", "5555", 6, 2026, "pm_card_mastercard_demo"),
-        ("amex", "0005", 3, 2028, "pm_card_amex_demo"),
-    ]
-    
-    card_idx = 0
-    for user, role_name in created_users:
-        if role_name == "client":
-            # Check if payment method already exists
-            existing_pm = await db.execute(
-                select(PaymentMethod).where(PaymentMethod.user_id == user.id)
-            )
-            if not existing_pm.scalar_one_or_none():
-                card = demo_cards[card_idx % len(demo_cards)]
-                pm = PaymentMethod(
-                    user_id=user.id,
-                    method_type="card",
-                    brand=card[0],
-                    last_four=card[1],
-                    exp_month=card[2],
-                    exp_year=card[3],
-                    is_default=True,
-                    stripe_payment_method_id=card[4],
-                )
-                db.add(pm)
-                card_idx += 1
-            
-            # Also create client profile if missing
-            existing_profile = await db.execute(
-                select(ClientProfile).where(ClientProfile.user_id == user.id)
-            )
-            if not existing_profile.scalar_one_or_none():
-                client_profile = ClientProfile(
-                    user_id=user.id,
-                    default_currency="USD",
-                )
-                db.add(client_profile)
-    
-    # Also add payment methods for existing demo clients who don't have them
-    existing_demo_clients = await db.execute(
-        select(User).join(UserRole).join(Role).where(
-            User.email.like("%@seryvo.demo.net"),
-            Role.name == "client"
-        )
-    )
-    for client in existing_demo_clients.scalars().all():
-        existing_pm = await db.execute(
-            select(PaymentMethod).where(PaymentMethod.user_id == client.id)
-        )
-        if not existing_pm.scalar_one_or_none():
-            card = demo_cards[card_idx % len(demo_cards)]
-            pm = PaymentMethod(
-                user_id=client.id,
-                method_type="card",
-                brand=card[0],
-                last_four=card[1],
-                exp_month=card[2],
-                exp_year=card[3],
-                is_default=True,
-                stripe_payment_method_id=card[4],
-            )
-            db.add(pm)
-            card_idx += 1
     
     # Audit log
     audit_log = AuditLog(
@@ -1974,4 +1902,151 @@ async def admin_reset_user_password(
         message=f"Password reset for {user.email}",
         user_id=user_id,
         temporary_password=temp_password,
+    )
+
+
+# ===============================
+# Platform Configuration
+# ===============================
+
+from app.models import PlatformConfig
+
+class PlatformConfigItem(BaseModel):
+    key: str
+    value: str
+    description: Optional[str] = None
+    category: str = "general"
+    is_secret: bool = False
+    updated_at: Optional[datetime] = None
+
+class PlatformConfigResponse(BaseModel):
+    configs: List[PlatformConfigItem]
+
+class UpdateConfigRequest(BaseModel):
+    key: str
+    value: str
+    description: Optional[str] = None
+    category: str = "general"
+    is_secret: bool = False
+
+
+@router.get("/platform-config", response_model=PlatformConfigResponse)
+async def get_platform_config(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    Get all platform configuration items.
+    Only accessible by admins.
+    """
+    result = await db.execute(select(PlatformConfig).order_by(PlatformConfig.category, PlatformConfig.key))
+    configs = result.scalars().all()
+    
+    config_items = []
+    for config in configs:
+        # Mask secret values for display
+        display_value = config.value
+        if config.is_secret and len(config.value) > 4:
+            display_value = config.value[:4] + "•" * (len(config.value) - 4)
+        
+        config_items.append(PlatformConfigItem(
+            key=config.key,
+            value=display_value,
+            description=config.description,
+            category=config.category,
+            is_secret=config.is_secret,
+            updated_at=config.updated_at
+        ))
+    
+    return PlatformConfigResponse(configs=config_items)
+
+
+@router.put("/platform-config", response_model=SuccessResponse)
+async def update_platform_config(
+    request: UpdateConfigRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    Update or create a platform configuration item.
+    Only accessible by admins.
+    """
+    # Check if config exists
+    result = await db.execute(select(PlatformConfig).where(PlatformConfig.key == request.key))
+    config = result.scalar_one_or_none()
+    
+    old_value = None
+    if config:
+        old_value = config.value if not config.is_secret else "[REDACTED]"
+        # Update existing
+        config.value = request.value
+        if request.description:
+            config.description = request.description
+        config.category = request.category
+        config.is_secret = request.is_secret
+    else:
+        # Create new
+        config = PlatformConfig(
+            key=request.key,
+            value=request.value,
+            description=request.description,
+            category=request.category,
+            is_secret=request.is_secret
+        )
+        db.add(config)
+    
+    # Audit log
+    audit_log = AuditLog(
+        actor_id=current_user.id,
+        action="admin.platform_config_updated",
+        entity_type="platform_config",
+        entity_id=0,
+        old_value={"key": request.key, "old_value": old_value} if old_value else None,
+        new_value={"key": request.key, "value": "[SET]" if request.is_secret else request.value}
+    )
+    db.add(audit_log)
+    
+    await db.commit()
+    
+    return SuccessResponse(
+        success=True,
+        message=f"Configuration '{request.key}' has been updated"
+    )
+
+
+@router.delete("/platform-config/{key}", response_model=SuccessResponse)
+async def delete_platform_config(
+    key: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    Delete a platform configuration item.
+    Only accessible by admins.
+    """
+    result = await db.execute(select(PlatformConfig).where(PlatformConfig.key == key))
+    config = result.scalar_one_or_none()
+    
+    if not config:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Configuration '{key}' not found"
+        )
+    
+    # Audit log
+    audit_log = AuditLog(
+        actor_id=current_user.id,
+        action="admin.platform_config_deleted",
+        entity_type="platform_config",
+        entity_id=0,
+        old_value={"key": key, "category": config.category}
+    )
+    db.add(audit_log)
+    
+    await db.delete(config)
+    await db.commit()
+    
+    return SuccessResponse(
+        success=True,
+        message=f"Configuration '{key}' has been deleted"
     )

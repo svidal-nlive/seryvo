@@ -9,10 +9,14 @@ import {
   ChevronDown,
   ExternalLink,
   Search,
+  Ticket,
+  CheckCircle,
 } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import { useAuth } from '../contexts/AuthContext';
+import CreateTicketModal from '../components/support/CreateTicketModal';
+import MyTicketsList from '../components/support/MyTicketsList';
 
 interface FAQItem {
   id: string;
@@ -64,6 +68,13 @@ export default function HelpView() {
   const { user } = useAuth();
   const [search, setSearch] = useState('');
   const [expandedFaq, setExpandedFaq] = useState<string | null>(null);
+  const [showTicketModal, setShowTicketModal] = useState(false);
+  const [ticketSubmitted, setTicketSubmitted] = useState(false);
+
+  const handleTicketSuccess = () => {
+    setTicketSubmitted(true);
+    setTimeout(() => setTicketSubmitted(false), 5000);
+  };
 
   const filteredFaqs = FAQ_ITEMS.filter(
     (faq) =>
@@ -94,38 +105,58 @@ export default function HelpView() {
         />
       </div>
 
+      {/* Success Toast */}
+      {ticketSubmitted && (
+        <div className="fixed top-4 right-4 z-50 animate-in slide-in-from-top-2 fade-in">
+          <div className="flex items-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg shadow-lg">
+            <CheckCircle size={18} />
+            <span className="text-sm font-medium">Support ticket submitted successfully!</span>
+          </div>
+        </div>
+      )}
+
       {/* Quick Actions */}
       <div className="grid gap-3 sm:grid-cols-3">
-        <Card className="cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors">
+        <Card 
+          className="cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors"
+          onClick={() => setShowTicketModal(true)}
+        >
           <div className="flex flex-col items-center text-center py-2">
             <div className="p-3 rounded-full bg-blue-100 dark:bg-blue-900/30 mb-2">
               <MessageCircle size={24} className="text-blue-600" />
             </div>
-            <p className="font-medium dark:text-white">Live Chat</p>
-            <p className="text-xs text-gray-500 dark:text-slate-400">Talk to an agent</p>
+            <p className="font-medium dark:text-white">Contact Support</p>
+            <p className="text-xs text-gray-500 dark:text-slate-400">Create a ticket</p>
           </div>
         </Card>
 
-        <Card className="cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors">
-          <div className="flex flex-col items-center text-center py-2">
-            <div className="p-3 rounded-full bg-green-100 dark:bg-green-900/30 mb-2">
-              <Phone size={24} className="text-green-600" />
+        <a href="tel:+18007379866" className="block">
+          <Card className="cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors h-full">
+            <div className="flex flex-col items-center text-center py-2">
+              <div className="p-3 rounded-full bg-green-100 dark:bg-green-900/30 mb-2">
+                <Phone size={24} className="text-green-600" />
+              </div>
+              <p className="font-medium dark:text-white">Call Us</p>
+              <p className="text-xs text-gray-500 dark:text-slate-400">1-800-SERYVO</p>
             </div>
-            <p className="font-medium dark:text-white">Call Us</p>
-            <p className="text-xs text-gray-500 dark:text-slate-400">1-800-SERYVO</p>
-          </div>
-        </Card>
+          </Card>
+        </a>
 
-        <Card className="cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors">
-          <div className="flex flex-col items-center text-center py-2">
-            <div className="p-3 rounded-full bg-purple-100 dark:bg-purple-900/30 mb-2">
-              <Mail size={24} className="text-purple-600" />
+        <a href="mailto:support@seryvo.com" className="block">
+          <Card className="cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors h-full">
+            <div className="flex flex-col items-center text-center py-2">
+              <div className="p-3 rounded-full bg-purple-100 dark:bg-purple-900/30 mb-2">
+                <Mail size={24} className="text-purple-600" />
+              </div>
+              <p className="font-medium dark:text-white">Email</p>
+              <p className="text-xs text-gray-500 dark:text-slate-400">support@seryvo.com</p>
             </div>
-            <p className="font-medium dark:text-white">Email</p>
-            <p className="text-xs text-gray-500 dark:text-slate-400">support@seryvo.com</p>
-          </div>
-        </Card>
+          </Card>
+        </a>
       </div>
+
+      {/* My Tickets Section */}
+      <MyTicketsList />
 
       {/* FAQ Section */}
       <Card>
@@ -211,6 +242,13 @@ export default function HelpView() {
         <p>Seryvo Transport Platform v1.0.0</p>
         <p>© 2024 Seryvo. All rights reserved.</p>
       </div>
+
+      {/* Create Ticket Modal */}
+      <CreateTicketModal
+        isOpen={showTicketModal}
+        onClose={() => setShowTicketModal(false)}
+        onSuccess={handleTicketSuccess}
+      />
     </div>
   );
 }

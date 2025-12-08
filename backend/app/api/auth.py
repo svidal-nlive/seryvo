@@ -4,12 +4,14 @@ Handles authentication, registration, and token management
 """
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
 from app.core.database import get_db
+from app.core.config import settings
+from app.core.logging_config import get_logger, log_security_event
 from app.core.security import (
     create_access_token,
     verify_password,
@@ -19,6 +21,8 @@ from app.core.security import (
 )
 from app.core.dependencies import get_current_user, CurrentUser
 from app.core.email_service import EmailService
+from app.core.enums import Role as RoleEnum
+from app.core.rate_limiter import limiter, RateLimits
 from app.models import User, Role, UserRole
 from app.schemas import (
     LoginRequest,
@@ -34,30 +38,21 @@ from app.schemas import (
 )
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
-
+logger = get_logger(__name__)
 
 # =============================================================================
 # Role Mapping (Database → Frontend)
 # =============================================================================
 
-# The database stores 'support' but frontend expects 'support_agent'
-ROLE_DB_TO_FRONTEND = {
-    "support": "support_agent",
-}
-
-ROLE_FRONTEND_TO_DB = {
-    "support_agent": "support",
-}
-
-
+# Use centralized role mapping from enums module
 def map_roles_to_frontend(db_roles: list[str]) -> list[str]:
     """Map database role names to frontend role names."""
-    return [ROLE_DB_TO_FRONTEND.get(role, role) for role in db_roles]
+    return RoleEnum.map_roles_to_frontend(db_roles)
 
 
 def map_role_to_db(frontend_role: str) -> str:
     """Map frontend role name to database role name."""
-    return ROLE_FRONTEND_TO_DB.get(frontend_role, frontend_role)
+    return RoleEnum.to_db(frontend_role)
 
 
 # =============================================================================
@@ -124,7 +119,7 @@ async def first_user_setup(
     # Ensure roles exist (create if not)
     roles_to_create = [
         ("admin", "System administrator with full access"),
-        ("support", "Customer support staff"),
+        ("support_agent", "Customer support agent with ticket management access"),
         ("driver", "Driver/chauffeur"),
         ("client", "Customer/passenger"),
     ]
@@ -176,18 +171,20 @@ async def first_user_setup(
 
 
 @router.post("/login", response_model=TokenResponse)
+@limiter.limit(RateLimits.AUTH)
 async def login(
-    request: LoginRequest,
+    request_body: LoginRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """Authenticate user and return JWT tokens."""
     # Find user by email
     result = await db.execute(
-        select(User).where(User.email == request.email)
+        select(User).where(User.email == request_body.email)
     )
     user = result.scalar_one_or_none()
     
-    if not user or not verify_password(request.password, user.password_hash):
+    if not user or not verify_password(request_body.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
@@ -227,14 +224,16 @@ async def login(
 
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit(RateLimits.AUTH)
 async def register(
-    request: RegisterRequest,
+    request_body: RegisterRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """Register a new user account."""
     # Check if email already exists
     result = await db.execute(
-        select(User).where(User.email == request.email)
+        select(User).where(User.email == request_body.email)
     )
     existing_user = result.scalar_one_or_none()
     
@@ -247,7 +246,7 @@ async def register(
     # Validate role - client, driver, and support_agent can self-register
     # Admin accounts must be created by existing admins
     valid_roles = ["client", "driver", "support_agent"]
-    if request.role not in valid_roles:
+    if request_body.role not in valid_roles:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid role. Must be one of: {valid_roles}",
@@ -255,17 +254,17 @@ async def register(
     
     # Create user
     user = User(
-        email=request.email,
-        password_hash=hash_password(request.password),
-        full_name=request.full_name,
-        phone=request.phone,
+        email=request_body.email,
+        password_hash=hash_password(request_body.password),
+        full_name=request_body.full_name,
+        phone=request_body.phone,
     )
     db.add(user)
     await db.flush()  # Get user ID
     
     # Assign role
     role_result = await db.execute(
-        select(Role).where(Role.name == request.role)
+        select(Role).where(Role.name == request_body.role)
     )
     role = role_result.scalar_one_or_none()
     
@@ -277,7 +276,7 @@ async def register(
     await db.refresh(user)
     
     # Create tokens
-    roles = [request.role]
+    roles = [request_body.role]
     access_token = create_access_token(
         data={"sub": str(user.id), "email": user.email, "roles": roles},
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -373,8 +372,10 @@ async def get_current_user_info(
 
 
 @router.post("/password-reset", response_model=SuccessResponse)
+@limiter.limit(RateLimits.SENSITIVE)
 async def request_password_reset(
-    request: PasswordResetRequest,
+    request_body: PasswordResetRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """Request password reset OTP code via email."""
@@ -382,13 +383,13 @@ async def request_password_reset(
     from app.core.email_service import EmailService
     
     result = await db.execute(
-        select(User).where(User.email == request.email)
+        select(User).where(User.email == request_body.email)
     )
     user = result.scalar_one_or_none()
     
     if user:
         # Check cooldown
-        can_send, remaining = await check_otp_cooldown(db, request.email, "email")
+        can_send, remaining = await check_otp_cooldown(db, request_body.email, "email")
         if not can_send:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -398,7 +399,7 @@ async def request_password_reset(
         # Create OTP for password reset
         otp = await create_otp(
             db=db,
-            identifier=request.email,
+            identifier=request_body.email,
             identifier_type="email",
             purpose="password_reset",
             user_id=user.id
@@ -407,15 +408,16 @@ async def request_password_reset(
         # Send OTP email
         try:
             await EmailService.send_otp_email(
-                to_email=request.email,
+                to_email=request_body.email,
                 otp_code=otp.code,
                 purpose="password_reset"
             )
-            print(f"[Password Reset] OTP sent to {request.email}")
+            log_security_event(logger, "password_reset_otp_sent", success=True)
         except Exception as e:
-            print(f"[Password Reset Error] Failed to send email: {e}")
-            # Log the code for development
-            print(f"[DEV] Password Reset OTP for {request.email}: {otp.code}")
+            logger.warning(f"Failed to send password reset email: {type(e).__name__}")
+            # In development only, log that OTP was generated (not the actual code)
+            if settings.debug:
+                logger.debug(f"Password reset OTP generated for user (email delivery failed)")
     
     # Always return success (don't reveal if email exists)
     return SuccessResponse(
@@ -546,8 +548,10 @@ from app.models import UserVerification
 
 
 @router.post("/otp/send", response_model=OTPSendResponse)
+@limiter.limit(RateLimits.OTP)
 async def send_otp_code(
-    request: OTPSendRequest,
+    request_body: OTPSendRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -561,7 +565,7 @@ async def send_otp_code(
     """
     # Validate purpose
     valid_purposes = ["registration", "login", "password_reset", "phone_verify"]
-    if request.purpose not in valid_purposes:
+    if request_body.purpose not in valid_purposes:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid purpose. Must be one of: {valid_purposes}",
@@ -569,7 +573,7 @@ async def send_otp_code(
     
     # Check cooldown
     can_send, remaining = await check_otp_cooldown(
-        db, request.identifier, request.identifier_type
+        db, request_body.identifier, request_body.identifier_type
     )
     if not can_send:
         raise HTTPException(
@@ -578,10 +582,10 @@ async def send_otp_code(
         )
     
     # For registration, check if identifier already exists
-    if request.purpose == "registration":
-        if request.identifier_type == "email":
+    if request_body.purpose == "registration":
+        if request_body.identifier_type == "email":
             existing = await db.execute(
-                select(User).where(User.email == request.identifier)
+                select(User).where(User.email == request_body.identifier)
             )
             if existing.scalar_one_or_none():
                 raise HTTPException(
@@ -593,17 +597,17 @@ async def send_otp_code(
     # Create OTP
     otp = await create_otp(
         db,
-        identifier=request.identifier,
-        identifier_type=request.identifier_type,
-        purpose=request.purpose,
+        identifier=request_body.identifier,
+        identifier_type=request_body.identifier_type,
+        purpose=request_body.purpose,
     )
     
     # Send OTP
     sent = await send_otp(
-        request.identifier,
-        request.identifier_type,
+        request_body.identifier,
+        request_body.identifier_type,
         otp.code,
-        request.purpose
+        request_body.purpose
     )
     
     if not sent:
@@ -614,9 +618,9 @@ async def send_otp_code(
     
     return OTPSendResponse(
         success=True,
-        message=f"Verification code sent to your {request.identifier_type}",
+        message=f"Verification code sent to your {request_body.identifier_type}",
         expires_in_seconds=OTP_EXPIRY_MINUTES * 60,
-        masked_identifier=mask_identifier(request.identifier, request.identifier_type),
+        masked_identifier=mask_identifier(request_body.identifier, request_body.identifier_type),
     )
 
 

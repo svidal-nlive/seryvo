@@ -24,6 +24,7 @@ import {
   Radio,
   RefreshCw,
   Database,
+  Key,
 } from 'lucide-react';
 import { useNavigation } from '../contexts/NavigationContext';
 import Card from '../components/ui/Card';
@@ -39,6 +40,7 @@ import RevenueReports from '../components/admin/RevenueReports';
 import AdminActionLogs from '../components/admin/AdminActionLogs';
 import { FleetMap } from '../components/map';
 import DemoDataSettingsView from './admin/DemoDataSettingsView';
+import APIKeysSettingsView from './admin/APIKeysSettingsView';
 import { backend } from '../services/backend';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { ChannelType, MessageType } from '../services/websocket';
@@ -127,6 +129,7 @@ export default function AdminDashboard() {
   const [showActionLogs, setShowActionLogs] = useState(false);
   const [showFleetMap, setShowFleetMap] = useState(false);
   const [showDemoDataSettings, setShowDemoDataSettings] = useState(false);
+  const [showAPIKeysSettings, setShowAPIKeysSettings] = useState(false);
 
   const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -486,6 +489,20 @@ export default function AdminDashboard() {
             <div className="flex-1 min-w-0">
               <p className="text-xs sm:text-sm font-medium dark:text-white truncate">Demo Data</p>
               <p className="text-[10px] sm:text-xs text-gray-400 truncate">Load or clear sample data</p>
+            </div>
+            <ChevronRight size={14} className="text-gray-400 hidden sm:block sm:w-4 sm:h-4" />
+          </Card>
+
+          <Card 
+            className="cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800 active:bg-gray-100 transition-colors flex items-center gap-2 sm:gap-3 p-3 sm:p-4 touch-manipulation"
+            onClick={() => setShowAPIKeysSettings(true)}
+          >
+            <div className="p-1.5 sm:p-2 rounded-lg bg-rose-100 dark:bg-rose-900/30 flex-shrink-0">
+              <Key size={14} className="text-rose-600 sm:w-[18px] sm:h-[18px]" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs sm:text-sm font-medium dark:text-white truncate">API Keys</p>
+              <p className="text-[10px] sm:text-xs text-gray-400 truncate">Manage platform API keys</p>
             </div>
             <ChevronRight size={14} className="text-gray-400 hidden sm:block sm:w-4 sm:h-4" />
           </Card>
@@ -913,6 +930,18 @@ export default function AdminDashboard() {
       >
         <div className="p-0 -m-6">
           <DemoDataSettingsView onBack={() => setShowDemoDataSettings(false)} />
+        </div>
+      </Modal>
+
+      {/* API Keys Settings */}
+      <Modal
+        isOpen={showAPIKeysSettings}
+        onClose={() => setShowAPIKeysSettings(false)}
+        title="API Keys & Configuration"
+        size="xl"
+      >
+        <div className="p-4">
+          <APIKeysSettingsView />
         </div>
       </Modal>
     </div>

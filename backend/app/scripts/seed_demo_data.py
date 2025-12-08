@@ -15,6 +15,10 @@ from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import async_session_maker, engine
+from app.core.enums import (
+    BookingStatus, DriverPlatformStatus, DriverAvailabilityStatus,
+    VehicleStatus, DocumentStatus, PaymentStatus, TicketStatus
+)
 from app.models import (
     Role, User, UserRole, Permission, RolePermission,
     ClientProfile, DriverProfile, SavedLocation, Vehicle, DriverDocument,
@@ -72,7 +76,7 @@ async def seed_roles(session: AsyncSession) -> dict:
     roles_data = [
         ("client", "Regular customer who books rides"),
         ("driver", "Verified driver who fulfills bookings"),
-        ("support", "Support agent handling tickets"),
+        ("support_agent", "Customer support agent with ticket management access"),
         ("admin", "Platform administrator with full access"),
     ]
     
@@ -123,7 +127,7 @@ async def seed_roles(session: AsyncSession) -> dict:
     # Assign support permissions
     support_perms = [p for p in permissions if 'tickets' in p.name or 'users.read' in p.name or 'bookings.read' in p.name]
     for perm in support_perms:
-        session.add(RolePermission(role_id=roles["support"].id, permission_id=perm.id))
+        session.add(RolePermission(role_id=roles["support_agent"].id, permission_id=perm.id))
     
     await session.flush()
     print(f"✓ Created {len(roles)} roles and {len(permissions)} permissions")
@@ -285,8 +289,8 @@ async def seed_users(session: AsyncSession, roles: dict) -> dict:
         ("emma@demo.com", "Emma Brown", "driver", "+1-555-0204"),
         
         # Support
-        ("support1@demo.com", "Lisa Support", "support", "+1-555-0301"),
-        ("support2@demo.com", "Tom Support", "support", "+1-555-0302"),
+        ("support1@demo.com", "Lisa Support", "support_agent", "+1-555-0301"),
+        ("support2@demo.com", "Tom Support", "support_agent", "+1-555-0302"),
         
         # Admin
         ("admin@demo.com", "David Admin", "admin", "+1-555-0401"),
@@ -368,10 +372,10 @@ async def seed_profiles(session: AsyncSession, users: dict, services: dict):
     
     # Driver profiles with vehicles
     driver_configs = [
-        ("mike@demo.com", "approved", "available", 4.8, 156, 95.0, 2.0, "standard", "Toyota", "Camry", 2022, "Silver", "ABC123"),
-        ("sarah@demo.com", "approved", "available", 4.9, 203, 97.0, 1.5, "comfort", "Honda", "Accord", 2023, "Black", "XYZ789"),
-        ("james@demo.com", "approved", "offline", 4.7, 89, 92.0, 3.0, "premium", "BMW", "5 Series", 2023, "White", "LUX001"),
-        ("emma@demo.com", "approved", "offline", 4.6, 45, 90.0, 4.0, "xl", "Chevrolet", "Suburban", 2022, "Gray", "XL2024"),
+        ("mike@demo.com", DriverPlatformStatus.ACTIVE.value, DriverAvailabilityStatus.AVAILABLE.value, 4.8, 156, 95.0, 2.0, "standard", "Toyota", "Camry", 2022, "Silver", "ABC123"),
+        ("sarah@demo.com", DriverPlatformStatus.ACTIVE.value, DriverAvailabilityStatus.AVAILABLE.value, 4.9, 203, 97.0, 1.5, "comfort", "Honda", "Accord", 2023, "Black", "XYZ789"),
+        ("james@demo.com", DriverPlatformStatus.ACTIVE.value, DriverAvailabilityStatus.OFFLINE.value, 4.7, 89, 92.0, 3.0, "premium", "BMW", "5 Series", 2023, "White", "LUX001"),
+        ("emma@demo.com", DriverPlatformStatus.ACTIVE.value, DriverAvailabilityStatus.OFFLINE.value, 4.6, 45, 90.0, 4.0, "xl", "Chevrolet", "Suburban", 2022, "Gray", "XL2024"),
     ]
     
     for email, status, avail, rating, total_ratings, accept_rate, cancel_rate, svc_code, make, model, year, color, plate in driver_configs:
@@ -399,17 +403,17 @@ async def seed_profiles(session: AsyncSession, users: dict, services: dict):
             license_plate=plate,
             capacity=service.base_capacity if service else 4,
             service_type_id=service.id if service else None,
-            status="approved",
+            status=VehicleStatus.APPROVED.value,
             is_active=True,
         )
         session.add(vehicle)
         
         # Add driver documents
         docs = [
-            ("drivers_license", "approved"),
-            ("vehicle_registration", "approved"),
-            ("insurance", "approved"),
-            ("background_check", "approved"),
+            ("drivers_license", DocumentStatus.APPROVED.value),
+            ("vehicle_registration", DocumentStatus.APPROVED.value),
+            ("insurance", DocumentStatus.APPROVED.value),
+            ("background_check", DocumentStatus.APPROVED.value),
         ]
         for doc_type, doc_status in docs:
             doc = DriverDocument(
@@ -477,23 +481,23 @@ async def seed_bookings(session: AsyncSession, users: dict, services: dict):
     
     bookings_data = [
         # (status, created_offset_mins, completed_offset_mins, fare, client_rating, driver_rating)
-        ("completed", -5*24*60, -5*24*60 + 60, 45.00, 5, 5),
-        ("completed", -4*24*60, -4*24*60 + 30, 28.50, 4, 5),
-        ("completed", -3*24*60, -3*24*60 + 45, 62.00, 5, 4),
-        ("completed", -2*24*60, -2*24*60 + 30, 35.00, 5, 5),
-        ("completed", -1*24*60, -1*24*60 + 60, 52.00, 4, 4),
-        ("in_progress", -20, None, 35.00, None, None),
-        ("confirmed", 60, None, 40.00, None, None),
-        ("requested", 120, None, 55.00, None, None),
-        ("scheduled", 24*60 + 600, None, 48.00, None, None),
-        ("cancelled", -3*60, None, 30.00, None, None),
+        (BookingStatus.COMPLETED.value, -5*24*60, -5*24*60 + 60, 45.00, 5, 5),
+        (BookingStatus.COMPLETED.value, -4*24*60, -4*24*60 + 30, 28.50, 4, 5),
+        (BookingStatus.COMPLETED.value, -3*24*60, -3*24*60 + 45, 62.00, 5, 4),
+        (BookingStatus.COMPLETED.value, -2*24*60, -2*24*60 + 30, 35.00, 5, 5),
+        (BookingStatus.COMPLETED.value, -1*24*60, -1*24*60 + 60, 52.00, 4, 4),
+        (BookingStatus.IN_PROGRESS.value, -20, None, 35.00, None, None),
+        (BookingStatus.DRIVER_ASSIGNED.value, 60, None, 40.00, None, None),
+        (BookingStatus.REQUESTED.value, 120, None, 55.00, None, None),
+        (BookingStatus.DRAFT.value, 24*60 + 600, None, 48.00, None, None),  # Scheduled = draft until pickup time
+        (BookingStatus.CANCELED_BY_CLIENT.value, -3*60, None, 30.00, None, None),
     ]
     
     service_list = list(services.values())
     
     for i, (status, created_offset, completed_offset, fare, client_rating, driver_rating) in enumerate(bookings_data):
         client = clients[i % len(clients)]
-        driver = drivers[i % len(drivers)] if status in ["completed", "in_progress", "confirmed"] else None
+        driver = drivers[i % len(drivers)] if status in BookingStatus.driver_active_statuses() + [BookingStatus.COMPLETED.value] else None
         
         pickup = locations[i % len(locations)]
         dropoff = locations[(i + 1) % len(locations)]
@@ -507,17 +511,17 @@ async def seed_bookings(session: AsyncSession, users: dict, services: dict):
             driver_id=driver.id if driver else None,
             service_type_id=service.id,
             status=status,
-            is_asap=(status != "scheduled"),
+            is_asap=(status != BookingStatus.DRAFT.value),
             pickup_address=pickup[0],
             pickup_lat=pickup[1],
             pickup_lng=pickup[2],
             dropoff_address=dropoff[0],
             dropoff_lat=dropoff[1],
             dropoff_lng=dropoff[2],
-            requested_pickup_at=created_at if status == "scheduled" else None,
-            started_at=created_at if status in ["completed", "in_progress"] else None,
+            requested_pickup_at=created_at if status == BookingStatus.DRAFT.value else None,
+            started_at=created_at if status in [BookingStatus.COMPLETED.value, BookingStatus.IN_PROGRESS.value] else None,
             completed_at=completed_at,
-            cancelled_at=created_at if status == "cancelled" else None,
+            cancelled_at=created_at if status in [BookingStatus.CANCELED_BY_CLIENT.value, BookingStatus.CANCELED_BY_DRIVER.value, BookingStatus.CANCELED_BY_SYSTEM.value] else None,
             passenger_count=random.randint(1, 3),
             luggage_count=random.randint(0, 2),
             special_notes="Demo booking" if i == 0 else None,
@@ -527,9 +531,9 @@ async def seed_bookings(session: AsyncSession, users: dict, services: dict):
             distance_fare=Decimal(str(round(fare * 0.4, 2))),
             time_fare=Decimal(str(round(fare * 0.2, 2))),
             surge_multiplier=Decimal("1.0"),
-            final_fare=Decimal(str(fare)) if status == "completed" else None,
-            driver_earnings=Decimal(str(round(fare * 0.75, 2))) if status == "completed" else None,
-            platform_fee=Decimal(str(round(fare * 0.25, 2))) if status == "completed" else None,
+            final_fare=Decimal(str(fare)) if status == BookingStatus.COMPLETED.value else None,
+            driver_earnings=Decimal(str(round(fare * 0.75, 2))) if status == BookingStatus.COMPLETED.value else None,
+            platform_fee=Decimal(str(round(fare * 0.25, 2))) if status == BookingStatus.COMPLETED.value else None,
             client_rating=client_rating,
             driver_rating=driver_rating,
             created_at=created_at,
@@ -566,7 +570,7 @@ async def seed_bookings(session: AsyncSession, users: dict, services: dict):
         )
         session.add(event)
         
-        if status == "completed":
+        if status == BookingStatus.COMPLETED.value:
             event2 = BookingEvent(
                 booking_id=booking.id,
                 event_type="trip_completed",
@@ -578,13 +582,13 @@ async def seed_bookings(session: AsyncSession, users: dict, services: dict):
             session.add(event2)
         
         # Add payment for completed bookings
-        if status == "completed":
+        if status == BookingStatus.COMPLETED.value:
             payment = Payment(
                 booking_id=booking.id,
                 amount=Decimal(str(fare)),
                 currency="USD",
                 payment_method="card",
-                payment_status="completed",
+                payment_status=PaymentStatus.COMPLETED.value,
                 created_at=completed_at,
                 completed_at=completed_at,
             )
@@ -601,10 +605,10 @@ async def seed_support_tickets(session: AsyncSession, users: dict):
     now = datetime.utcnow()
     
     tickets_data = [
-        ("alice@demo.com", "Payment issue", "billing", "medium", "open", "I was charged twice for my last ride"),
-        ("bob@demo.com", "Driver complaint", "driver", "high", "in_progress", "Driver was very rude during my trip"),
-        ("carol@demo.com", "Promo code not working", "promo", "low", "resolved", "WELCOME20 code didn't apply"),
-        ("alice@demo.com", "Lost item", "lost_item", "medium", "open", "I left my phone in the car"),
+        ("alice@demo.com", "Payment issue", "billing", "medium", TicketStatus.OPEN.value, "I was charged twice for my last ride"),
+        ("bob@demo.com", "Driver complaint", "driver", "high", TicketStatus.IN_PROGRESS.value, "Driver was very rude during my trip"),
+        ("carol@demo.com", "Promo code not working", "promo", "low", TicketStatus.RESOLVED.value, "WELCOME20 code didn't apply"),
+        ("alice@demo.com", "Lost item", "lost_item", "medium", TicketStatus.OPEN.value, "I left my phone in the car"),
     ]
     
     support_user = users.get("support1@demo.com")
@@ -613,7 +617,7 @@ async def seed_support_tickets(session: AsyncSession, users: dict):
         user = users[email]
         ticket = SupportTicket(
             user_id=user.id,
-            assigned_to=support_user.id if status == "in_progress" else None,
+            assigned_to=support_user.id if status == TicketStatus.IN_PROGRESS.value else None,
             subject=subject,
             category=category,
             priority=priority,
@@ -634,7 +638,7 @@ async def seed_support_tickets(session: AsyncSession, users: dict):
         session.add(msg)
         
         # Add support response for in_progress tickets
-        if status == "in_progress" and support_user:
+        if status == TicketStatus.IN_PROGRESS.value and support_user:
             response = SupportTicketMessage(
                 ticket_id=ticket.id,
                 sender_id=support_user.id,

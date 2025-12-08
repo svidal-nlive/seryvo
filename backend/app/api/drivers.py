@@ -5,7 +5,7 @@ Handles driver operations, job management, and status updates
 from datetime import datetime
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 import os
 import uuid
@@ -13,6 +13,7 @@ import aiofiles
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, require_roles
+from app.core.enums import BookingStatus, DriverAvailabilityStatus, DriverPlatformStatus, DocumentStatus
 from app.models import (
     User, Role, UserRole, DriverProfile, Vehicle, DriverDocument,
     Booking, BookingStop, BookingEvent, AuditLog, PaymentMethod, Payment
@@ -31,6 +32,10 @@ from app.schemas import (
     DriverDocumentResponse,
     DriverDocumentReviewRequest,
 )
+from app.api.response_builders import (
+    build_booking_stop_response,
+    build_driver_job_response,
+)
 
 router = APIRouter(prefix="/drivers", tags=["Drivers"])
 
@@ -38,56 +43,6 @@ router = APIRouter(prefix="/drivers", tags=["Drivers"])
 # Role dependency for driver-only endpoints
 require_driver = require_roles(["admin", "driver"])
 
-
-# ===========================================
-# Helper functions for aligned responses
-# ===========================================
-
-def build_booking_stop_response(stop: BookingStop) -> BookingStopResponse:
-    """Build a BookingStopResponse from a BookingStop model - aligned with model fields."""
-    return BookingStopResponse(
-        id=stop.id,
-        sequence=stop.sequence,
-        address=stop.address,
-        lat=float(stop.lat) if stop.lat else None,
-        lng=float(stop.lng) if stop.lng else None,
-        stop_type=stop.stop_type,
-        arrived_at=stop.arrived_at
-    )
-
-
-def build_driver_job_response(
-    booking: Booking,
-    stops: List[BookingStop],
-    client_name: Optional[str] = None,
-    client_phone: Optional[str] = None,
-    client_rating_avg: Optional[float] = None
-) -> DriverJobResponse:
-    """Build a DriverJobResponse from a Booking model - aligned with model fields."""
-    return DriverJobResponse(
-        id=booking.id,
-        status=booking.status,
-        is_asap=booking.is_asap,
-        requested_pickup_at=booking.requested_pickup_at,
-        pickup_address=booking.pickup_address,
-        pickup_lat=float(booking.pickup_lat) if booking.pickup_lat else None,
-        pickup_lng=float(booking.pickup_lng) if booking.pickup_lng else None,
-        dropoff_address=booking.dropoff_address,
-        dropoff_lat=float(booking.dropoff_lat) if booking.dropoff_lat else None,
-        dropoff_lng=float(booking.dropoff_lng) if booking.dropoff_lng else None,
-        estimated_distance_km=float(booking.estimated_distance_km) if booking.estimated_distance_km else None,
-        estimated_duration_min=booking.estimated_duration_min,
-        base_fare=float(booking.base_fare) if booking.base_fare else None,
-        final_fare=float(booking.final_fare) if booking.final_fare else None,
-        driver_earnings=float(booking.driver_earnings) if booking.driver_earnings else None,
-        passenger_count=booking.passenger_count,
-        luggage_count=booking.luggage_count,
-        special_notes=booking.special_notes,
-        stops=[build_booking_stop_response(s) for s in stops],
-        client_name=client_name,
-        client_phone=client_phone,
-        client_rating_avg=client_rating_avg
-    )
 
 
 @router.get("/profile", response_model=DriverProfileResponse)
@@ -107,7 +62,7 @@ async def get_driver_profile(
         # Create profile if doesn't exist
         profile = DriverProfile(
             user_id=user_id,
-            status="pending",
+            status="pending_verification",
             availability_status="offline"
         )
         db.add(profile)
@@ -149,12 +104,12 @@ async def update_driver_status(
     if not profile:
         profile = DriverProfile(
             user_id=user_id,
-            status="approved",
+            status="active",
             availability_status=request.availability_status
         )
         db.add(profile)
     else:
-        if profile.status != "approved":
+        if profile.status != "active":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Driver account is not approved"
@@ -315,13 +270,13 @@ async def get_available_jobs(
     )
     profile = profile_result.scalar_one_or_none()
     
-    if not profile or profile.availability_status != "available":
+    if not profile or profile.availability_status != DriverAvailabilityStatus.AVAILABLE.value:
         return []
     
-    # Get pending bookings without a driver
+    # Get pending bookings without a driver (using canonical status)
     result = await db.execute(
         select(Booking).where(
-            Booking.status.in_(["pending", "searching"]),
+            Booking.status.in_(BookingStatus.awaiting_driver_statuses()),
             Booking.driver_id.is_(None)
         ).order_by(Booking.created_at.desc()).limit(10)
     )
@@ -363,7 +318,7 @@ async def get_current_job(
     result = await db.execute(
         select(Booking).where(
             Booking.driver_id == user_id,
-            Booking.status.in_(["accepted", "arrived", "in_progress"])
+            Booking.status.in_(BookingStatus.driver_active_statuses())
         ).order_by(Booking.created_at.desc()).limit(1)
     )
     booking = result.scalar_one_or_none()
@@ -407,7 +362,7 @@ async def accept_job(
     )
     profile = profile_result.scalar_one_or_none()
     
-    if not profile or profile.status != "approved":
+    if not profile or profile.status != "active":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Driver account is not approved"
@@ -431,7 +386,7 @@ async def accept_job(
             detail="Booking already assigned to a driver"
         )
     
-    if booking.status not in ["pending", "searching"]:
+    if booking.status not in BookingStatus.awaiting_driver_statuses():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Booking is not available for acceptance"
@@ -439,7 +394,7 @@ async def accept_job(
     
     # Accept booking
     booking.driver_id = user_id
-    booking.status = "accepted"
+    booking.status = BookingStatus.DRIVER_ASSIGNED.value
     
     # Update driver status
     profile.availability_status = "busy"
@@ -542,13 +497,13 @@ async def arrive_at_pickup(
             detail="Booking not found"
         )
     
-    if booking.status != "accepted":
+    if booking.status != BookingStatus.DRIVER_ASSIGNED.value:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid booking status for this action"
         )
     
-    booking.status = "arrived"
+    booking.status = BookingStatus.DRIVER_ARRIVED.value
     
     # Create event
     event = BookingEvent(
@@ -601,13 +556,13 @@ async def start_trip(
             detail="Booking not found"
         )
     
-    if booking.status != "arrived":
+    if booking.status != BookingStatus.DRIVER_ARRIVED.value:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid booking status for this action"
         )
     
-    booking.status = "in_progress"
+    booking.status = BookingStatus.IN_PROGRESS.value
     booking.started_at = datetime.utcnow()
     
     # Create event
@@ -649,13 +604,13 @@ async def complete_trip(
             detail="Booking not found"
         )
     
-    if booking.status != "in_progress":
+    if booking.status != BookingStatus.IN_PROGRESS.value:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid booking status for this action"
         )
     
-    booking.status = "completed"
+    booking.status = BookingStatus.COMPLETED.value
     booking.completed_at = datetime.utcnow()
     
     # final_fare should already be set from booking creation; if not, use base_fare
@@ -866,7 +821,10 @@ async def get_driver_history(
     result = await db.execute(
         select(Booking).where(
             Booking.driver_id == user_id,
-            Booking.status.in_(["completed", "cancelled"])
+            or_(
+                Booking.status == BookingStatus.COMPLETED.value,
+                Booking.status.like("canceled%")  # Match all cancellation statuses
+            )
         ).order_by(Booking.created_at.desc()).offset(offset).limit(page_size)
     )
     bookings = result.scalars().all()

@@ -24,7 +24,7 @@ router = APIRouter(prefix="/users", tags=["Users"])
 
 
 # Use the require_roles function from dependencies
-require_admin_or_support = require_roles(["admin", "support"])
+require_admin_or_support = require_roles(["admin", "support_agent"])
 require_admin = require_roles(["admin"])
 
 
@@ -112,7 +112,7 @@ async def get_user_stats(
     """Get user statistics by role and status."""
     # Count users by role
     role_counts = {}
-    roles = ["client", "driver", "support", "admin"]
+    roles = ["client", "driver", "support_agent", "admin"]
     
     for role_name in roles:
         count_query = (
@@ -136,7 +136,7 @@ async def get_user_stats(
         "active_drivers": active_drivers,
         "pending_drivers": pending_drivers,
         "suspended_drivers": suspended_drivers,
-        "total_support": role_counts.get("support", 0),
+        "total_support_agents": role_counts.get("support_agent", 0),
         "total_admins": role_counts.get("admin", 0),
     }
 
@@ -167,7 +167,7 @@ async def get_user(
     current_user_id = current_user.id
     user_roles = [ur.role.name for ur in current_user.roles]
     
-    if user_id != current_user_id and not any(r in ["admin", "support"] for r in user_roles):
+    if user_id != current_user_id and not any(r in ["admin", "support_agent"] for r in user_roles):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Cannot view other users' profiles"

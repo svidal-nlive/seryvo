@@ -1061,6 +1061,44 @@ class MockBackendService {
     return message;
   }
 
+  /**
+   * Create or get an existing chat session for a booking.
+   * This is used for in-trip messaging between client and driver.
+   */
+  async createOrGetBookingChat(
+    bookingId: string,
+    participants: Array<{ id: string; name: string }>
+  ): Promise<ChatSession> {
+    await delay(100);
+
+    // Check if a chat already exists for this booking
+    const existingChat = this.chats.find(
+      (c) => c.type === 'booking' && c.booking_id === bookingId
+    );
+
+    if (existingChat) {
+      return existingChat;
+    }
+
+    // Create a new chat session
+    const displayNames: Record<string, string> = {};
+    participants.forEach((p) => {
+      displayNames[p.id] = p.name;
+    });
+
+    const newChat: ChatSession = {
+      chat_id: `chat-booking-${bookingId}`,
+      type: 'booking',
+      booking_id: bookingId,
+      participant_ids: participants.map((p) => p.id),
+      participant_display_names: displayNames,
+      unread_count: 0,
+    };
+
+    this.chats.push(newChat);
+    return newChat;
+  }
+
   // ---- Support Tickets ----
 
   async getTickets(filters?: {
@@ -1152,6 +1190,26 @@ class MockBackendService {
 
     this.tickets.unshift(ticket);
     return ticket;
+  }
+
+  async sendTicketMessage(ticketId: string, message: string): Promise<void> {
+    await delay(200);
+    const ticket = this.tickets.find((t) => t.ticket_id === ticketId);
+    if (!ticket) throw new Error('Ticket not found');
+    
+    // Add message to the ticket's messages array (mock implementation)
+    if (!ticket.messages) {
+      ticket.messages = [];
+    }
+    ticket.messages.push({
+      id: `msg-${Date.now()}`,
+      sender_id: 'current-user',
+      sender_name: 'You',
+      message,
+      is_internal: false,
+      created_at: now(),
+    });
+    ticket.updated_at = now();
   }
 
   // ---- Payment Methods ----

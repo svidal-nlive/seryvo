@@ -8,6 +8,7 @@ from app.api.support import router as support_router
 from app.api.websocket import router as websocket_router
 from app.api.payments import router as payments_router
 from app.api.notifications import router as notifications_router
+from app.api.organizations import router as organizations_router
 
 __all__ = [
     "auth_router",
@@ -19,4 +20,5 @@ __all__ = [
     "websocket_router",
     "payments_router",
     "notifications_router",
+    "organizations_router",
 ]

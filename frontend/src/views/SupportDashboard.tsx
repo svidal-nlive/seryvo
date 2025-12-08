@@ -191,7 +191,10 @@ export default function SupportDashboard() {
     
     setSendingMessage(true);
     try {
-      // Create new message
+      // Send message to backend
+      await backend.sendTicketMessage(selectedTicket.ticket_id, chatMessage.trim());
+      
+      // Create new message for local display
       const newMsg = {
         id: `msg-${Date.now()}`,
         sender_id: user.id,
@@ -203,9 +206,6 @@ export default function SupportDashboard() {
       
       setTicketMessages(prev => [...prev, newMsg]);
       setChatMessage('');
-      
-      // In real app, this would call backend API to send message
-      // await backend.sendTicketMessage(selectedTicket.ticket_id, chatMessage, user.id);
     } catch (error) {
       console.error('Failed to send message:', error);
     } finally {

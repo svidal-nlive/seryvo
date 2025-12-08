@@ -4,7 +4,8 @@ Request/Response models for API endpoints
 """
 from datetime import datetime
 from typing import Optional, List, Any, Dict
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
+import re
 
 
 # ===========================================
@@ -29,10 +30,36 @@ class LoginRequest(BaseModel):
 class RegisterRequest(BaseModel):
     """Registration request payload."""
     email: EmailStr
-    password: str = Field(..., min_length=6)
-    full_name: str = Field(..., min_length=2)
-    phone: Optional[str] = None
-    role: str = Field(default="client")  # client, driver
+    password: str = Field(..., min_length=8, max_length=128, description="Password must be 8-128 characters")
+    full_name: str = Field(..., min_length=2, max_length=100)
+    phone: Optional[str] = Field(None, max_length=20)
+    role: str = Field(default="client", pattern="^(client|driver)$")
+    
+    @field_validator('password')
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        """Validate password strength."""
+        if len(v) < 8:
+            raise ValueError('Password must be at least 8 characters')
+        if not re.search(r'[A-Z]', v):
+            raise ValueError('Password must contain at least one uppercase letter')
+        if not re.search(r'[a-z]', v):
+            raise ValueError('Password must contain at least one lowercase letter')
+        if not re.search(r'\d', v):
+            raise ValueError('Password must contain at least one number')
+        return v
+    
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v: Optional[str]) -> Optional[str]:
+        """Validate phone number format."""
+        if v is None:
+            return v
+        # Remove spaces, dashes, and parentheses for validation
+        cleaned = re.sub(r'[\s\-\(\)]', '', v)
+        if not re.match(r'^\+?[1-9]\d{7,14}$', cleaned):
+            raise ValueError('Invalid phone number format')
+        return v
 
 
 class TokenResponse(BaseModel):
@@ -250,11 +277,11 @@ class PriceEstimateResponse(BaseModel):
 
 class BookingStopCreate(BaseModel):
     """Create booking stop payload."""
-    sequence: int = 0
-    address: str
-    lat: Optional[float] = None
-    lng: Optional[float] = None
-    stop_type: str = "pickup"  # 'pickup' or 'dropoff'
+    sequence: int = Field(default=0, ge=0, le=10, description="Stop sequence (0-10)")
+    address: str = Field(..., min_length=5, max_length=500, description="Full address")
+    lat: Optional[float] = Field(None, ge=-90, le=90, description="Latitude (-90 to 90)")
+    lng: Optional[float] = Field(None, ge=-180, le=180, description="Longitude (-180 to 180)")
+    stop_type: str = Field(default="pickup", pattern="^(pickup|dropoff|stop)$")
 
 
 class BookingStopResponse(BaseSchema):
@@ -292,13 +319,26 @@ class BookingStopResponse(BaseSchema):
 
 class BookingCreate(BaseModel):
     """Create booking payload."""
-    service_type_id: Optional[int] = None
+    service_type_id: Optional[int] = Field(None, gt=0)
     requested_pickup_at: Optional[datetime] = None  # Aligned with model field name
-    passenger_count: int = 1
-    luggage_count: int = 0  # Aligned with model field name (integer, not string)
-    special_notes: Optional[str] = None  # Aligned with model field name
-    promotion_code: Optional[str] = None
-    stops: List[BookingStopCreate]  # At least 2 stops (pickup + dropoff)
+    passenger_count: int = Field(default=1, ge=1, le=10, description="Passengers (1-10)")
+    luggage_count: int = Field(default=0, ge=0, le=10, description="Luggage pieces (0-10)")
+    special_notes: Optional[str] = Field(None, max_length=500)
+    promotion_code: Optional[str] = Field(None, max_length=50, pattern="^[A-Z0-9]{3,20}$")
+    stops: List[BookingStopCreate] = Field(..., min_length=2, max_length=5, description="At least 2 stops required")
+    
+    @field_validator('stops')
+    @classmethod
+    def validate_stops(cls, v: List[BookingStopCreate]) -> List[BookingStopCreate]:
+        """Validate stops have pickup and dropoff."""
+        if len(v) < 2:
+            raise ValueError('At least 2 stops (pickup and dropoff) are required')
+        stop_types = [s.stop_type for s in v]
+        if 'pickup' not in stop_types:
+            raise ValueError('At least one pickup stop is required')
+        if 'dropoff' not in stop_types:
+            raise ValueError('At least one dropoff stop is required')
+        return v
     
     # Deprecated aliases for backward compatibility
     @property
@@ -807,5 +847,110 @@ class DriverPayoutResponse(BaseSchema):
     failure_reason: Optional[str] = None
     created_at: datetime
     completed_at: Optional[datetime] = None
+
+
+# ===========================================
+# Organization Schemas (Multi-Tenancy)
+# ===========================================
+
+class OrganizationCreate(BaseModel):
+    """Create organization request."""
+    slug: str = Field(..., min_length=3, max_length=50, pattern=r'^[a-z0-9-]+$')
+    name: str = Field(..., min_length=2, max_length=255)
+    logo_url: Optional[str] = None
+    primary_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')
+    secondary_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')
+    timezone: str = Field(default="UTC")
+    currency: str = Field(default="USD", max_length=3)
+    country_code: Optional[str] = Field(None, max_length=2)
+    phone_prefix: Optional[str] = Field(None, max_length=10)
+    contact_email: Optional[EmailStr] = None
+    contact_phone: Optional[str] = None
+    address: Optional[str] = None
+
+
+class OrganizationUpdate(BaseModel):
+    """Update organization request."""
+    name: Optional[str] = Field(None, min_length=2, max_length=255)
+    logo_url: Optional[str] = None
+    primary_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')
+    secondary_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')
+    timezone: Optional[str] = None
+    currency: Optional[str] = Field(None, max_length=3)
+    country_code: Optional[str] = Field(None, max_length=2)
+    phone_prefix: Optional[str] = Field(None, max_length=10)
+    contact_email: Optional[EmailStr] = None
+    contact_phone: Optional[str] = None
+    address: Optional[str] = None
+    subscription_tier: Optional[str] = None
+    max_drivers: Optional[int] = None
+    max_bookings_per_month: Optional[int] = None
+    features: Optional[Dict[str, Any]] = None
+    is_active: Optional[bool] = None
+
+
+class OrganizationResponse(BaseSchema):
+    """Organization response."""
+    id: int
+    slug: str
+    name: str
+    logo_url: Optional[str] = None
+    primary_color: Optional[str] = None
+    secondary_color: Optional[str] = None
+    timezone: str
+    currency: str
+    country_code: Optional[str] = None
+    phone_prefix: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+    address: Optional[str] = None
+    subscription_tier: str
+    max_drivers: Optional[int] = None
+    max_bookings_per_month: Optional[int] = None
+    features: Optional[Dict[str, Any]] = None
+    is_active: bool
+    suspended_at: Optional[datetime] = None
+    suspension_reason: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    member_count: Optional[int] = None  # Computed field
+
+
+class OrganizationMemberCreate(BaseModel):
+    """Add member to organization request."""
+    user_id: int
+    role: str = Field(..., pattern=r'^(org_admin|support|driver|client)$')
+    is_primary: bool = False
+
+
+class OrganizationMemberUpdate(BaseModel):
+    """Update organization member request."""
+    role: Optional[str] = Field(None, pattern=r'^(org_admin|support|driver|client)$')
+    is_primary: Optional[bool] = None
+    is_active: Optional[bool] = None
+
+
+class OrganizationMemberResponse(BaseSchema):
+    """Organization member response."""
+    id: int
+    organization_id: int
+    user_id: int
+    role: str
+    is_primary: bool
+    is_active: bool
+    joined_at: datetime
+    invited_by: Optional[int] = None
+    # Include user info
+    user_email: Optional[str] = None
+    user_full_name: Optional[str] = None
+
+
+class OrganizationListResponse(BaseModel):
+    """Paginated list of organizations."""
+    items: List[OrganizationResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
 
 

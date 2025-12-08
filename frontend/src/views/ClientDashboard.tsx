@@ -35,6 +35,8 @@ import {
   UserCircle2,
   Star,
   ShieldCheck,
+  MessageCircle,
+  AlertTriangle,
 } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -43,6 +45,8 @@ import Modal from '../components/ui/Modal';
 import DateTimePicker from '../components/ui/DateTimePicker';
 import { Tabs, TabPanel } from '../components/ui/Tabs';
 import { MessagingView } from '../components/messaging';
+import InTripChatModal from '../components/messaging/InTripChatModal';
+import CreateTicketModal from '../components/support/CreateTicketModal';
 import TripDetailsModal from '../components/TripDetailsModal';
 import LocationInput from '../components/booking/LocationInput';
 import MapPickerModal from '../components/booking/MapPickerModal';
@@ -169,6 +173,11 @@ export default function ClientDashboard() {
 
   // Real-time notification toast state
   const [notification, setNotification] = useState<{ message: string; type: 'info' | 'success' | 'warning' } | null>(null);
+
+  // In-trip chat and report issue state
+  const [showChatModal, setShowChatModal] = useState(false);
+  const [showReportIssueModal, setShowReportIssueModal] = useState(false);
+  const [chatBooking, setChatBooking] = useState<Booking | null>(null);
 
   // Handle real-time booking updates
   const handleBookingUpdate = useCallback((data: BookingUpdatePayload) => {
@@ -1157,7 +1166,7 @@ export default function ClientDashboard() {
                 )}
 
                 {/* Emergency Contact - shown during active trips */}
-                {['driver_en_route_pickup', 'driver_arrived', 'in_progress'].includes(b.status) && (
+                {['driver_assigned', 'driver_en_route_pickup', 'driver_arrived', 'in_progress'].includes(b.status) && (
                   <div className="p-3 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2 text-red-700 dark:text-red-400">
@@ -1190,14 +1199,36 @@ export default function ClientDashboard() {
                   >
                     Details
                   </Button>
-                  {['driver_en_route_pickup', 'driver_arrived', 'in_progress'].includes(b.status) && (
-                    <Button
-                      variant="secondary"
-                      className="text-xs"
-                      onClick={() => setShareTrip(b)}
-                    >
-                      <Share2 size={14} /> Share
-                    </Button>
+                  {['driver_assigned', 'driver_en_route_pickup', 'driver_arrived', 'in_progress'].includes(b.status) && (
+                    <>
+                      <Button
+                        variant="secondary"
+                        className="text-xs"
+                        onClick={() => setShareTrip(b)}
+                      >
+                        <Share2 size={14} /> Share
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        className="text-xs"
+                        onClick={() => {
+                          setChatBooking(b);
+                          setShowChatModal(true);
+                        }}
+                      >
+                        <MessageCircle size={14} /> Chat
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        className="text-xs text-amber-600 border-amber-300 hover:bg-amber-50"
+                        onClick={() => {
+                          setChatBooking(b);
+                          setShowReportIssueModal(true);
+                        }}
+                      >
+                        <AlertTriangle size={14} /> Issue
+                      </Button>
+                    </>
                   )}
                   {b.status === 'requested' && (
                     <Button
@@ -1577,6 +1608,37 @@ export default function ClientDashboard() {
         isOpen={showAlertsSettings}
         onClose={() => setShowAlertsSettings(false)}
       />
+
+      {/* In-Trip Chat Modal */}
+      {chatBooking && (
+        <InTripChatModal
+          isOpen={showChatModal}
+          onClose={() => {
+            setShowChatModal(false);
+            setChatBooking(null);
+          }}
+          booking={chatBooking}
+          otherPartyName="Driver"
+        />
+      )}
+
+      {/* Report Issue Modal */}
+      {chatBooking && (
+        <CreateTicketModal
+          isOpen={showReportIssueModal}
+          onClose={() => {
+            setShowReportIssueModal(false);
+            setChatBooking(null);
+          }}
+          booking={chatBooking}
+          defaultCategory="trip_issue"
+          onSuccess={() => {
+            setShowReportIssueModal(false);
+            setChatBooking(null);
+            setNotification({ message: 'Issue reported successfully. Support will contact you soon.', type: 'success' });
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, require_roles
+from app.core.enums import BookingStatus, PaymentStatus
 from app.models import (
     User, PaymentMethod, Payment, Booking, DriverPayout
 )
@@ -328,7 +329,7 @@ async def get_earnings_summary(
         select(func.sum(Booking.driver_earnings))
         .where(
             Booking.driver_id == current_user.id,
-            Booking.status == "completed",
+            Booking.status == BookingStatus.COMPLETED.value,
             Booking.completed_at >= today_start
         )
     )
@@ -339,7 +340,7 @@ async def get_earnings_summary(
         select(func.sum(Booking.driver_earnings))
         .where(
             Booking.driver_id == current_user.id,
-            Booking.status == "completed",
+            Booking.status == BookingStatus.COMPLETED.value,
             Booking.completed_at >= week_start
         )
     )
@@ -350,7 +351,7 @@ async def get_earnings_summary(
         select(func.sum(Booking.driver_earnings))
         .where(
             Booking.driver_id == current_user.id,
-            Booking.status == "completed",
+            Booking.status == BookingStatus.COMPLETED.value,
             Booking.completed_at >= month_start
         )
     )
@@ -361,7 +362,7 @@ async def get_earnings_summary(
         select(func.sum(Booking.driver_earnings))
         .where(
             Booking.driver_id == current_user.id,
-            Booking.status == "completed"
+            Booking.status == BookingStatus.COMPLETED.value
         )
     )
     total_earnings = total_result.scalar() or 0
@@ -410,7 +411,7 @@ async def process_refund(
             detail="Payment not found"
         )
     
-    if payment.status not in ["completed", "captured"]:
+    if payment.status not in PaymentStatus.refundable_statuses():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot refund this payment"
@@ -424,7 +425,7 @@ async def process_refund(
         )
     
     payment.refund_amount = refund_amount
-    payment.status = "refunded" if refund_amount == float(payment.amount) else "partially_refunded"
+    payment.status = PaymentStatus.REFUNDED.value if refund_amount == float(payment.amount) else PaymentStatus.PARTIALLY_REFUNDED.value
     
     await db.commit()
     await db.refresh(payment)
@@ -583,16 +584,16 @@ async def confirm_stripe_payment(
     stripe_status = result.get("status")
     
     if stripe_status == "succeeded":
-        payment.payment_status = "completed"
+        payment.payment_status = PaymentStatus.COMPLETED.value
         payment.completed_at = datetime.utcnow()
         payment.payment_method = "card"
     elif stripe_status == "requires_payment_method":
-        payment.payment_status = "failed"
+        payment.payment_status = PaymentStatus.FAILED.value
         payment.failure_reason = "Payment method required"
     elif stripe_status == "requires_action":
-        payment.payment_status = "pending"
+        payment.payment_status = PaymentStatus.PENDING.value
     elif stripe_status == "canceled":
-        payment.payment_status = "cancelled"
+        payment.payment_status = PaymentStatus.CANCELLED.value
     else:
         payment.payment_status = stripe_status
     

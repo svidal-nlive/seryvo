@@ -326,22 +326,6 @@ export async function getAuditLogs(params?: {
   return api.get<AuditLogEntry[]>(endpoint);
 }
 
-// ---- System Configuration ----
-
-/**
- * Get system configuration.
- */
-export async function getSystemConfig(): Promise<Record<string, unknown>> {
-  return api.get('/admin/config');
-}
-
-/**
- * Update system configuration.
- */
-export async function updateSystemConfig(config: Record<string, unknown>): Promise<void> {
-  await api.patch('/admin/config', config);
-}
-
 // ---- Demo Data Management ----
 
 export interface DemoDataStatus {
@@ -471,6 +455,70 @@ export async function getFleetStatus(): Promise<FleetStatusResponse> {
   return api.get('/admin/fleet/status');
 }
 
+// ---- Platform Configuration ----
+
+export interface PlatformConfigItem {
+  key: string;
+  value: string;
+  description: string;
+  category: string;
+  is_secret: boolean;
+  updated_at?: string;
+}
+
+export interface PlatformConfigResponse {
+  configs: PlatformConfigItem[];
+}
+
+export interface UpdateConfigRequest {
+  key: string;
+  value: string;
+  description?: string;
+  category?: string;
+  is_secret?: boolean;
+}
+
+/**
+ * Get all platform configuration items.
+ */
+export async function getPlatformConfig(): Promise<PlatformConfigResponse> {
+  return api.get('/admin/platform-config');
+}
+
+/**
+ * Update or create a platform configuration item.
+ */
+export async function updatePlatformConfig(config: UpdateConfigRequest): Promise<{ success: boolean; message: string }> {
+  return api.put('/admin/platform-config', config);
+}
+
+/**
+ * Delete a platform configuration item.
+ */
+export async function deletePlatformConfig(key: string): Promise<{ success: boolean; message: string }> {
+  return api.delete(`/admin/platform-config/${key}`);
+}
+
+/**
+ * Get system configuration (for backwards compatibility).
+ */
+export async function getSystemConfig(): Promise<PlatformConfigResponse> {
+  return getPlatformConfig();
+}
+
+/**
+ * Update system configuration (for backwards compatibility).
+ */
+export async function updateSystemConfig(configs: Record<string, string | null>): Promise<{ success: boolean; message: string }> {
+  // Convert to individual config updates
+  for (const [key, value] of Object.entries(configs)) {
+    if (value !== null) {
+      await updatePlatformConfig({ key, value, category: 'general', is_secret: false });
+    }
+  }
+  return { success: true, message: 'Configuration updated' };
+}
+
 export const adminApi = {
   getDashboardStats,
   getRevenueReport,
@@ -496,6 +544,10 @@ export const adminApi = {
   factoryReset,
   // Fleet management
   getFleetStatus,
+  // Platform configuration
+  getPlatformConfig,
+  updatePlatformConfig,
+  deletePlatformConfig,
 };
 
 export default adminApi;

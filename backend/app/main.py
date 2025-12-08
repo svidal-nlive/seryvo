@@ -9,6 +9,8 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.database import init_db, close_db
+from app.core.rate_limiter import setup_rate_limiting
+from app.core.security_headers import SecurityHeadersMiddleware
 from app.api import (
     auth_router,
     users_router,
@@ -19,6 +21,7 @@ from app.api import (
     websocket_router,
     payments_router,
     notifications_router,
+    organizations_router,
 )
 
 
@@ -58,6 +61,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Add Security Headers (production-ready)
+app.add_middleware(SecurityHeadersMiddleware)
+
+# Configure Rate Limiting
+setup_rate_limiting(app)
+
+
+# Import custom exception for handler
+from app.core.errors import SeryvoException, ErrorCode
+
+
+# Custom SeryvoException handler
+@app.exception_handler(SeryvoException)
+async def seryvo_exception_handler(request: Request, exc: SeryvoException):
+    """Handle Seryvo-specific exceptions with standardized format."""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "success": False,
+            "error": exc.detail,
+        },
+        headers=exc.headers,
+    )
+
 
 # Global exception handler
 @app.exception_handler(Exception)
@@ -66,11 +93,24 @@ async def global_exception_handler(request: Request, exc: Exception):
     if settings.debug:
         return JSONResponse(
             status_code=500,
-            content={"error": str(exc), "detail": repr(exc)}
+            content={
+                "success": False,
+                "error": {
+                    "error_code": ErrorCode.INTERNAL_ERROR.value,
+                    "message": "An internal error occurred",
+                    "detail": str(exc),
+                },
+            }
         )
     return JSONResponse(
         status_code=500,
-        content={"error": "Internal server error"}
+        content={
+            "success": False,
+            "error": {
+                "error_code": ErrorCode.INTERNAL_ERROR.value,
+                "message": "An internal error occurred",
+            },
+        }
     )
 
 
@@ -102,6 +142,7 @@ app.include_router(support_router, prefix="/api/v1")
 app.include_router(websocket_router, prefix="/api/v1")
 app.include_router(payments_router, prefix="/api/v1")
 app.include_router(notifications_router, prefix="/api/v1")
+app.include_router(organizations_router, prefix="/api/v1")
 
 
 # Run with uvicorn

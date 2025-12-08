@@ -121,7 +121,7 @@ class DriverProfile(Base):
     __tablename__ = "driver_profiles"
     
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    status: Mapped[str] = mapped_column(String(50), default="pending", nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="pending_verification", nullable=False)
     availability_status: Mapped[str] = mapped_column(String(50), default="offline", nullable=False)
     current_lat: Mapped[Optional[float]] = mapped_column(Numeric(10, 7))
     current_lng: Mapped[Optional[float]] = mapped_column(Numeric(10, 7))
@@ -135,18 +135,8 @@ class DriverProfile(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     user: Mapped["User"] = relationship(back_populates="driver_profile")
-    vehicles: Mapped[List["Vehicle"]] = relationship(
-        "Vehicle",
-        back_populates="driver",
-        primaryjoin="DriverProfile.user_id == foreign(Vehicle.driver_id)",
-        viewonly=True
-    )
-    documents: Mapped[List["DriverDocument"]] = relationship(
-        "DriverDocument",
-        back_populates="driver",
-        primaryjoin="DriverProfile.user_id == foreign(DriverDocument.driver_id)",
-        viewonly=True
-    )
+    vehicles: Mapped[List["Vehicle"]] = relationship(back_populates="driver", foreign_keys="[Vehicle.driver_id]", primaryjoin="Vehicle.driver_id == DriverProfile.user_id")
+    documents: Mapped[List["DriverDocument"]] = relationship(back_populates="driver", foreign_keys="[DriverDocument.driver_id]", primaryjoin="DriverDocument.driver_id == DriverProfile.user_id")
 
 
 class SavedLocation(Base):
@@ -183,16 +173,11 @@ class Vehicle(Base):
     color: Mapped[Optional[str]] = mapped_column(String(50))
     license_plate: Mapped[Optional[str]] = mapped_column(String(50))
     capacity: Mapped[int] = mapped_column(Integer, default=4, nullable=False)
-    status: Mapped[str] = mapped_column(String(50), default="pending", nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="pending_approval", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
-    driver: Mapped["DriverProfile"] = relationship(
-        "DriverProfile",
-        back_populates="vehicles",
-        primaryjoin="foreign(Vehicle.driver_id) == DriverProfile.user_id",
-        viewonly=True
-    )
+    driver: Mapped["DriverProfile"] = relationship(back_populates="vehicles", foreign_keys=[driver_id], primaryjoin="Vehicle.driver_id == DriverProfile.user_id")
     service_type: Mapped[Optional["ServiceType"]] = relationship()
 
 
@@ -204,19 +189,14 @@ class DriverDocument(Base):
     driver_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     doc_type: Mapped[str] = mapped_column(String(100), nullable=False)
     file_url: Mapped[Optional[str]] = mapped_column(String(500))
-    status: Mapped[str] = mapped_column(String(50), default="pending", nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="pending_review", nullable=False)
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     reviewed_by: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"))
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     rejection_reason: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
-    driver: Mapped["DriverProfile"] = relationship(
-        "DriverProfile",
-        back_populates="documents",
-        primaryjoin="foreign(DriverDocument.driver_id) == DriverProfile.user_id",
-        viewonly=True
-    )
+    driver: Mapped["DriverProfile"] = relationship(back_populates="documents", foreign_keys=[driver_id], primaryjoin="DriverDocument.driver_id == DriverProfile.user_id")
 
 
 # ===========================================
@@ -228,6 +208,7 @@ class Region(Base):
     __tablename__ = "regions"
     
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("organizations.id", ondelete="SET NULL"), index=True)
     code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     timezone: Mapped[Optional[str]] = mapped_column(String(50))
@@ -236,6 +217,9 @@ class Region(Base):
     geojson: Mapped[Optional[dict]] = mapped_column(JSON)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    # Relationships
+    organization: Mapped[Optional["Organization"]] = relationship(back_populates="regions")
 
 
 class ServiceType(Base):
@@ -255,6 +239,7 @@ class PricingRule(Base):
     __tablename__ = "pricing_rules"
     
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("organizations.id", ondelete="SET NULL"), index=True)
     region_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("regions.id", ondelete="SET NULL"))
     service_type_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("service_types.id", ondelete="SET NULL"))
     base_fare: Mapped[float] = mapped_column(Numeric(10, 2), default=0, nullable=False)
@@ -265,6 +250,7 @@ class PricingRule(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
+    organization: Mapped[Optional["Organization"]] = relationship(back_populates="pricing_rules")
     region: Mapped[Optional["Region"]] = relationship()
     service_type: Mapped[Optional["ServiceType"]] = relationship()
 
@@ -308,6 +294,7 @@ class Promotion(Base):
     __tablename__ = "promotions"
     
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("organizations.id", ondelete="SET NULL"), index=True)
     code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
     discount_type: Mapped[str] = mapped_column(String(20), nullable=False)  # percentage or fixed
@@ -318,6 +305,9 @@ class Promotion(Base):
     ends_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    # Relationships
+    organization: Mapped[Optional["Organization"]] = relationship(back_populates="promotions")
 
 
 # ===========================================
@@ -329,6 +319,7 @@ class Booking(Base):
     __tablename__ = "bookings"
     
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("organizations.id", ondelete="SET NULL"), index=True)
     client_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     driver_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), index=True)
     service_type_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("service_types.id", ondelete="SET NULL"))
@@ -376,6 +367,7 @@ class Booking(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     # Relationships
+    organization: Mapped[Optional["Organization"]] = relationship(back_populates="bookings")
     client: Mapped["User"] = relationship(back_populates="bookings_as_client", foreign_keys=[client_id])
     driver: Mapped[Optional["User"]] = relationship(back_populates="bookings_as_driver", foreign_keys=[driver_id])
     stops: Mapped[List["BookingStop"]] = relationship(back_populates="booking", order_by="BookingStop.sequence")
@@ -423,6 +415,7 @@ class SupportTicket(Base):
     __tablename__ = "support_tickets"
     
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("organizations.id", ondelete="SET NULL"), index=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     assigned_to: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"))
     booking_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("bookings.id", ondelete="SET NULL"), index=True)
@@ -434,6 +427,7 @@ class SupportTicket(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
+    organization: Mapped[Optional["Organization"]] = relationship(back_populates="support_tickets")
     creator: Mapped["User"] = relationship(foreign_keys=[user_id])
     assignee: Mapped[Optional["User"]] = relationship(foreign_keys=[assigned_to])
     booking: Mapped[Optional["Booking"]] = relationship()
@@ -666,3 +660,105 @@ class PushSubscription(Base):
 
 # Alias for backward compatibility
 TicketMessage = SupportTicketMessage
+
+
+# ===============================
+# 12. Platform Configuration
+# ===============================
+
+class PlatformConfig(Base):
+    """
+    Platform configuration for API keys and system settings.
+    Stores environment variables and secrets that can be managed via admin UI.
+    """
+    __tablename__ = "platform_config"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    category: Mapped[str] = mapped_column(String(50), default="general", nullable=False)
+    is_secret: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_platform_config_category", "category"),
+    )
+
+
+# ===============================
+# 13. Multi-Tenancy: Organizations
+# ===============================
+
+class Organization(Base):
+    """
+    Organization entity for multi-tenant SaaS architecture.
+    Each organization represents a separate transport company/tenant.
+    """
+    __tablename__ = "organizations"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    slug: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)  # URL-safe identifier
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    logo_url: Mapped[Optional[str]] = mapped_column(String(500))
+    primary_color: Mapped[Optional[str]] = mapped_column(String(7))  # Hex color e.g. #FF5733
+    secondary_color: Mapped[Optional[str]] = mapped_column(String(7))
+    timezone: Mapped[str] = mapped_column(String(50), default="UTC", nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    country_code: Mapped[Optional[str]] = mapped_column(String(2))  # ISO 3166-1 alpha-2
+    phone_prefix: Mapped[Optional[str]] = mapped_column(String(10))  # e.g. +1, +44
+    contact_email: Mapped[Optional[str]] = mapped_column(String(255))
+    contact_phone: Mapped[Optional[str]] = mapped_column(String(50))
+    address: Mapped[Optional[str]] = mapped_column(Text)
+    
+    # Subscription and limits
+    subscription_tier: Mapped[str] = mapped_column(String(50), default="starter", nullable=False)  # starter, growth, enterprise
+    max_drivers: Mapped[Optional[int]] = mapped_column(Integer)  # None = unlimited
+    max_bookings_per_month: Mapped[Optional[int]] = mapped_column(Integer)
+    
+    # Feature flags
+    features: Mapped[Optional[str]] = mapped_column(JSON)  # JSON object of enabled features
+    
+    # Status
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    suspended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    suspension_reason: Mapped[Optional[str]] = mapped_column(Text)
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    # Relationships
+    members: Mapped[List["OrganizationMember"]] = relationship(back_populates="organization", lazy="selectin")
+    bookings: Mapped[List["Booking"]] = relationship(back_populates="organization")
+    pricing_rules: Mapped[List["PricingRule"]] = relationship(back_populates="organization")
+    regions: Mapped[List["Region"]] = relationship(back_populates="organization")
+    support_tickets: Mapped[List["SupportTicket"]] = relationship(back_populates="organization")
+    promotions: Mapped[List["Promotion"]] = relationship(back_populates="organization")
+
+
+class OrganizationMember(Base):
+    """
+    Links users to organizations with role context.
+    A user can belong to multiple organizations with different roles.
+    """
+    __tablename__ = "organization_members"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(50), nullable=False)  # org_admin, support, driver, client
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # User's primary org
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    invited_by: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"))
+    
+    # Relationships
+    organization: Mapped["Organization"] = relationship(back_populates="members")
+    user: Mapped["User"] = relationship(foreign_keys=[user_id])
+    inviter: Mapped[Optional["User"]] = relationship(foreign_keys=[invited_by])
+    
+    __table_args__ = (
+        Index("ix_org_members_unique", "organization_id", "user_id", unique=True),
+    )

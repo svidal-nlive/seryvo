@@ -27,7 +27,7 @@ async def init_database():
         # ===== Roles =====
         roles = [
             Role(name="admin", description="System administrator with full access"),
-            Role(name="support", description="Customer support staff"),
+            Role(name="support_agent", description="Customer support agent with ticket management access"),
             Role(name="driver", description="Driver/chauffeur"),
             Role(name="client", description="Customer/passenger"),
         ]
@@ -77,7 +77,7 @@ async def init_database():
             db.add(RolePermission(role_id=role_map["admin"], permission_id=perm_id))
         
         for perm_id in support_permissions:
-            db.add(RolePermission(role_id=role_map["support"], permission_id=perm_id))
+            db.add(RolePermission(role_id=role_map["support_agent"], permission_id=perm_id))
         
         await db.flush()
         print("✅ Assigned permissions to roles")

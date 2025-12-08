@@ -77,6 +77,14 @@ __all__ = [
     "OTPVerifyResponse",
     "UserVerificationResponse",
     "RegisterWithOTPRequest",
+    # Organizations (Multi-Tenancy)
+    "OrganizationCreate",
+    "OrganizationUpdate",
+    "OrganizationResponse",
+    "OrganizationMemberCreate",
+    "OrganizationMemberUpdate",
+    "OrganizationMemberResponse",
+    "OrganizationListResponse",
     # Generic
     "SuccessResponse",
     "ErrorResponse",

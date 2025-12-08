@@ -4,13 +4,16 @@ Handles booking creation, management, and client operations
 """
 from datetime import datetime
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy import select, func, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, require_roles
+from app.core.enums import BookingStatus
+from app.core.rate_limiter import limiter, RateLimits
+from app.core.config import settings
 from app.models import (
     User, Booking, BookingStop, BookingEvent, ServiceType,
     PricingRule, SurgeRule, Region, Promotion, PromotionRedemption,
@@ -32,91 +35,18 @@ from app.schemas import (
     UserResponse,
 )
 from app.api.websocket import notify_new_booking_offer, get_online_drivers
+from app.api.response_builders import (
+    build_booking_stop_response,
+    build_booking_response,
+    build_service_type_response,
+)
 
 router = APIRouter(prefix="/bookings", tags=["Bookings"])
 
 
 # Role dependency helpers
 require_client = require_roles(["admin", "client"])
-require_any_role = require_roles(["admin", "support", "driver", "client"])
-
-
-# ===========================================
-# Helper functions to build aligned responses
-# ===========================================
-
-def build_booking_stop_response(stop: BookingStop) -> BookingStopResponse:
-    """Build a BookingStopResponse from a BookingStop model - aligned with model fields."""
-    return BookingStopResponse(
-        id=stop.id,
-        sequence=stop.sequence,
-        address=stop.address,
-        lat=float(stop.lat) if stop.lat else None,
-        lng=float(stop.lng) if stop.lng else None,
-        stop_type=stop.stop_type,
-        arrived_at=stop.arrived_at
-    )
-
-
-def build_booking_response(
-    booking: Booking,
-    stops: List[BookingStop],
-    client: Optional[UserResponse] = None,
-    driver: Optional[UserResponse] = None,
-    service_type: Optional[ServiceTypeResponse] = None
-) -> BookingResponse:
-    """Build a BookingResponse from a Booking model - aligned with model fields."""
-    return BookingResponse(
-        id=booking.id,
-        client_id=booking.client_id,
-        driver_id=booking.driver_id,
-        service_type_id=booking.service_type_id,
-        status=booking.status,
-        is_asap=booking.is_asap,
-        # Address fields
-        pickup_address=booking.pickup_address,
-        pickup_lat=float(booking.pickup_lat) if booking.pickup_lat else None,
-        pickup_lng=float(booking.pickup_lng) if booking.pickup_lng else None,
-        dropoff_address=booking.dropoff_address,
-        dropoff_lat=float(booking.dropoff_lat) if booking.dropoff_lat else None,
-        dropoff_lng=float(booking.dropoff_lng) if booking.dropoff_lng else None,
-        # Time fields
-        requested_pickup_at=booking.requested_pickup_at,
-        confirmed_at=booking.confirmed_at,
-        started_at=booking.started_at,
-        completed_at=booking.completed_at,
-        cancelled_at=booking.cancelled_at,
-        # Details
-        passenger_count=booking.passenger_count,
-        luggage_count=booking.luggage_count,
-        special_notes=booking.special_notes,
-        # Pricing
-        estimated_distance_km=float(booking.estimated_distance_km) if booking.estimated_distance_km else None,
-        estimated_duration_min=booking.estimated_duration_min,
-        base_fare=float(booking.base_fare) if booking.base_fare else None,
-        distance_fare=float(booking.distance_fare) if booking.distance_fare else None,
-        time_fare=float(booking.time_fare) if booking.time_fare else None,
-        surge_multiplier=float(booking.surge_multiplier) if booking.surge_multiplier else None,
-        extras_total=float(booking.extras_total) if booking.extras_total else None,
-        tax_total=float(booking.tax_total) if booking.tax_total else None,
-        discount_total=float(booking.discount_total) if booking.discount_total else None,
-        final_fare=float(booking.final_fare) if booking.final_fare else None,
-        driver_earnings=float(booking.driver_earnings) if booking.driver_earnings else None,
-        platform_fee=float(booking.platform_fee) if booking.platform_fee else None,
-        # Ratings
-        client_rating=booking.client_rating,
-        driver_rating=booking.driver_rating,
-        client_feedback=booking.client_feedback,
-        driver_feedback=booking.driver_feedback,
-        # Timestamps
-        created_at=booking.created_at,
-        updated_at=booking.updated_at,
-        # Related objects
-        stops=[build_booking_stop_response(s) for s in stops],
-        client=client,
-        driver=driver,
-        service_type=service_type
-    )
+require_any_role = require_roles(["admin", "support_agent", "driver", "client"])
 
 
 async def calculate_price(
@@ -142,8 +72,8 @@ async def calculate_price(
     
     distance_km = haversine(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
     
-    # Estimate duration (assume avg 30 km/h in city)
-    duration_minutes = (distance_km / 30) * 60
+    # Estimate duration using configurable average city speed
+    duration_minutes = (distance_km / settings.pricing_avg_city_speed_kmh) * 60
     
     # Get pricing rule
     query = select(PricingRule).where(PricingRule.is_active == True)
@@ -159,12 +89,12 @@ async def calculate_price(
     result = await db.execute(query)
     pricing_rule = result.scalar_one_or_none()
     
-    # Default pricing if no rule found
-    base_fare = 5.0
-    per_km = 1.5
-    per_minute = 0.3
-    minimum_fare = 10.0
-    currency = "USD"
+    # Use configurable default pricing if no rule found
+    base_fare = settings.pricing_default_base_fare
+    per_km = settings.pricing_default_per_km
+    per_minute = settings.pricing_default_per_minute
+    minimum_fare = settings.pricing_default_minimum_fare
+    currency = settings.pricing_default_currency
     
     if pricing_rule:
         base_fare = float(pricing_rule.base_fare)
@@ -247,8 +177,10 @@ async def list_service_types(
 
 
 @router.post("", response_model=BookingResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit(RateLimits.BOOKING_CREATE)
 async def create_booking(
-    request: BookingCreate,
+    request_body: BookingCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -271,32 +203,32 @@ async def create_booking(
         )
     
     # Validate stops (need at least pickup and dropoff)
-    if len(request.stops) < 2:
+    if len(request_body.stops) < 2:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="At least 2 stops (pickup and dropoff) are required"
         )
     
     # Calculate price estimate
-    pickup = request.stops[0]
-    dropoff = request.stops[-1]
+    pickup = request_body.stops[0]
+    dropoff = request_body.stops[-1]
     estimate = await calculate_price(
         db,
         pickup.lat or 0,
         pickup.lng or 0,
         dropoff.lat or 0,
         dropoff.lng or 0,
-        request.service_type_id,
-        request.requested_pickup_at
+        request_body.service_type_id,
+        request_body.requested_pickup_at
     )
     
     # Check promotion code
     discount = 0
     promo = None
-    if request.promotion_code:
+    if request_body.promotion_code:
         promo_result = await db.execute(
             select(Promotion).where(
-                Promotion.code == request.promotion_code,
+                Promotion.code == request_body.promotion_code,
                 Promotion.is_active == True
             )
         )
@@ -309,24 +241,24 @@ async def create_booking(
                 discount = promo.discount_value
     
     # Create booking with aligned field names
-    pickup_stop = request.stops[0] if request.stops else None
-    dropoff_stop = request.stops[-1] if len(request.stops) > 1 else request.stops[0] if request.stops else None
+    pickup_stop = request_body.stops[0] if request_body.stops else None
+    dropoff_stop = request_body.stops[-1] if len(request_body.stops) > 1 else request_body.stops[0] if request_body.stops else None
     
     booking = Booking(
         client_id=client_id,
-        service_type_id=request.service_type_id,
-        status="requested",  # Use 'requested' to match frontend expectations
-        is_asap=request.requested_pickup_at is None,
-        requested_pickup_at=request.requested_pickup_at,
+        service_type_id=request_body.service_type_id,
+        status=BookingStatus.REQUESTED.value,  # Canonical status
+        is_asap=request_body.requested_pickup_at is None,
+        requested_pickup_at=request_body.requested_pickup_at,
         pickup_address=pickup_stop.address if pickup_stop else "Unknown",
         pickup_lat=pickup_stop.lat if pickup_stop else None,
         pickup_lng=pickup_stop.lng if pickup_stop else None,
         dropoff_address=dropoff_stop.address if dropoff_stop else "Unknown",
         dropoff_lat=dropoff_stop.lat if dropoff_stop else None,
         dropoff_lng=dropoff_stop.lng if dropoff_stop else None,
-        passenger_count=request.passenger_count,
-        luggage_count=request.luggage_count,
-        special_notes=request.special_notes,
+        passenger_count=request_body.passenger_count,
+        luggage_count=request_body.luggage_count,
+        special_notes=request_body.special_notes,
         estimated_distance_km=estimate.estimated_distance_km,
         estimated_duration_min=int(estimate.estimated_duration_minutes),
         base_fare=estimate.estimated_fare - discount,
@@ -337,7 +269,7 @@ async def create_booking(
     await db.flush()
     
     # Create stops
-    for idx, stop_data in enumerate(request.stops):
+    for idx, stop_data in enumerate(request_body.stops):
         stop = BookingStop(
             booking_id=booking.id,
             sequence=idx,
@@ -358,7 +290,7 @@ async def create_booking(
     db.add(event)
     
     # Record promotion redemption
-    if request.promotion_code and discount > 0 and promo:
+    if request_body.promotion_code and discount > 0 and promo:
         redemption = PromotionRedemption(
             promotion_id=promo.id,
             user_id=client_id,
@@ -383,7 +315,7 @@ async def create_booking(
         # Get available drivers (approved and online)
         available_drivers_result = await db.execute(
             select(DriverProfile.user_id).where(
-                DriverProfile.status == "approved",
+                DriverProfile.status == "active",
                 DriverProfile.availability_status == "available"
             )
         )
@@ -471,14 +403,14 @@ async def list_bookings(
     query = select(Booking)
     
     # Filter by role
-    if "admin" in user_roles or "support" in user_roles:
+    if "admin" in user_roles or "support_agent" in user_roles:
         pass  # Show all bookings
     elif "driver" in user_roles:
         # Drivers see their assigned bookings AND all 'requested' bookings (offers)
         query = query.where(
             or_(
                 Booking.driver_id == user_id,
-                Booking.status == "requested"  # Unassigned bookings are offers
+                Booking.status == BookingStatus.REQUESTED.value  # Unassigned bookings are offers
             )
         )
     else:
@@ -543,7 +475,7 @@ async def get_booking(
         )
     
     # Check access
-    is_admin = any(r in ["admin", "support"] for r in user_roles)
+    is_admin = any(r in ["admin", "support_agent"] for r in user_roles)
     if not is_admin and booking.client_id != user_id and booking.driver_id != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -683,7 +615,7 @@ async def update_booking_status(
         )
     
     # Check permissions
-    is_admin = any(r in ["admin", "support"] for r in user_roles)
+    is_admin = any(r in ["admin", "support_agent"] for r in user_roles)
     is_driver = "driver" in user_roles
     is_client = booking.client_id == user_id
     is_assigned_driver = booking.driver_id == user_id
@@ -698,7 +630,7 @@ async def update_booking_status(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only drivers can accept booking offers"
             )
-        if booking.status != "requested":
+        if booking.status != BookingStatus.REQUESTED.value:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Can only accept bookings in 'requested' status"
@@ -829,21 +761,30 @@ async def cancel_booking(
         )
     
     # Check permissions
-    is_admin = any(r in ["admin", "support"] for r in user_roles)
+    is_admin = any(r in ["admin", "support_agent"] for r in user_roles)
     if not is_admin and booking.client_id != user_id and booking.driver_id != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to cancel this booking"
         )
     
-    if booking.status in ["completed", "cancelled"]:
+    if booking.status in [BookingStatus.COMPLETED.value] or booking.status.startswith("canceled"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Booking is already completed or cancelled"
         )
     
+    # Determine cancellation status based on who is cancelling
+    if booking.client_id == user_id:
+        cancel_status = BookingStatus.CANCELED_BY_CLIENT.value
+    elif booking.driver_id == user_id:
+        cancel_status = BookingStatus.CANCELED_BY_DRIVER.value
+    else:
+        # Admin/support cancellation
+        cancel_status = BookingStatus.CANCELED_BY_SYSTEM.value
+    
     # Update booking
-    booking.status = "cancelled"
+    booking.status = cancel_status
     booking.cancelled_at = datetime.utcnow()
     # Note: cancel_reason is stored in the event metadata, not on the booking model
     

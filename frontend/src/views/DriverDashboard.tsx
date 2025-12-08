@@ -27,6 +27,7 @@ import {
   CheckCircle,
   AlertCircle,
   Loader2,
+  AlertTriangle,
 } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -35,6 +36,8 @@ import Modal from '../components/ui/Modal';
 import StarRating from '../components/ui/StarRating';
 import { Tabs, TabPanel } from '../components/ui/Tabs';
 import { MessagingView } from '../components/messaging';
+import InTripChatModal from '../components/messaging/InTripChatModal';
+import CreateTicketModal from '../components/support/CreateTicketModal';
 import PerformanceStats, { type PerformanceMetrics } from '../components/driver/PerformanceStats';
 import NavigationButton from '../components/driver/NavigationButton';
 import { SkeletonCardGrid, SkeletonCard } from '../components/ui/SkeletonLoader';
@@ -104,6 +107,12 @@ export default function DriverDashboard() {
 
   // Real-time notification state
   const [notification, setNotification] = useState<{ message: string; type: 'info' | 'success' | 'warning' } | null>(null);
+
+  // Chat modal for in-trip messaging
+  const [showChatModal, setShowChatModal] = useState(false);
+
+  // Support ticket modal for reporting issues
+  const [showReportModal, setShowReportModal] = useState(false);
 
   // Flag to trigger data reload from WebSocket events
   const [shouldReload, setShouldReload] = useState(0);
@@ -545,13 +554,26 @@ export default function DriverDashboard() {
             </div>
 
             {/* Actions */}
-            <div className="flex gap-2 pt-2">
-              <Button variant="secondary" className="flex-1">
+            <div className="flex flex-wrap gap-2 pt-2">
+              <Button variant="secondary" className="flex-1 min-w-[80px]">
                 <Phone size={16} /> Call
               </Button>
-              <Button variant="secondary" className="flex-1">
+              <Button 
+                variant="secondary" 
+                className="flex-1 min-w-[80px]"
+                onClick={() => setShowChatModal(true)}
+              >
                 <MessageCircle size={16} /> Chat
               </Button>
+              <Button
+                variant="ghost"
+                className="text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20"
+                onClick={() => setShowReportModal(true)}
+              >
+                <AlertTriangle size={16} /> Report Issue
+              </Button>
+            </div>
+            <div className="flex gap-2 pt-2">
               {activeTrip.legs[0] && (
                 <NavigationButton
                   destination={
@@ -965,6 +987,27 @@ export default function DriverDashboard() {
           </div>
         </div>
       </Modal>
+
+      {/* In-Trip Chat Modal */}
+      {activeTrip && (
+        <InTripChatModal
+          isOpen={showChatModal}
+          onClose={() => setShowChatModal(false)}
+          booking={activeTrip}
+          otherPartyName="Client"
+        />
+      )}
+
+      {/* Report Issue Modal */}
+      {activeTrip && (
+        <CreateTicketModal
+          isOpen={showReportModal}
+          onClose={() => setShowReportModal(false)}
+          booking={activeTrip}
+          defaultCategory="trip_issue"
+          defaultSubject={`Issue during trip #${activeTrip.booking_id}`}
+        />
+      )}
     </div>
   );
 }

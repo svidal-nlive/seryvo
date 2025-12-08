@@ -33,6 +33,10 @@ from app.models.models import (
     OTPCode,
     UserVerification,
     PushSubscription,
+    PlatformConfig,
+    # Multi-tenancy
+    Organization,
+    OrganizationMember,
 )
 
 __all__ = [
@@ -69,4 +73,8 @@ __all__ = [
     "OTPCode",
     "UserVerification",
     "PushSubscription",
+    "PlatformConfig",
+    # Multi-tenancy
+    "Organization",
+    "OrganizationMember",
 ]

@@ -386,6 +386,18 @@ class RealBackendService {
     return mockBackend.sendMessage(chatId, senderId, senderName, body);
   }
 
+  /**
+   * Create or get an existing chat session for a booking.
+   * Used for in-trip messaging between client and driver.
+   */
+  async createOrGetBookingChat(
+    bookingId: string,
+    participants: Array<{ id: string; name: string }>
+  ): Promise<ChatSession> {
+    // For now, use mock backend. In production, this would call the real API
+    return mockBackend.createOrGetBookingChat(bookingId, participants);
+  }
+
   // ==========================================
   // Support Tickets
   // ==========================================
@@ -428,7 +440,7 @@ class RealBackendService {
       return {
         ticket_id: String(t.id),
         booking_id: t.booking_id ? String(t.booking_id) : undefined,
-        client_id: String(t.user_id),
+        client_id: String(t.created_by || t.user_id),
         created_at: t.created_at,
         updated_at: t.updated_at,
         status: t.status,
@@ -437,6 +449,15 @@ class RealBackendService {
         subject: t.subject,
         public_description: t.description,
         assignee_id: t.assigned_to ? String(t.assigned_to) : undefined,
+        assignee_name: t.assignee?.full_name,
+        messages: (t.messages || []).map((m: any) => ({
+          id: String(m.id),
+          sender_id: String(m.sender_id),
+          sender_name: m.sender?.full_name || 'Support',
+          message: m.message,
+          is_internal: m.is_internal,
+          created_at: m.created_at,
+        })),
       };
     } catch {
       return mockBackend.getTicketById(ticketId);
@@ -496,6 +517,18 @@ class RealBackendService {
         ...data,
         priority: data.priority || 'medium',
       });
+    }
+  }
+
+  async sendTicketMessage(ticketId: string, message: string): Promise<void> {
+    try {
+      await api.post(`/support/tickets/${ticketId}/messages`, {
+        message,
+        is_internal: false,
+      });
+    } catch (error) {
+      console.error('Failed to send ticket message:', error);
+      throw error;
     }
   }
 

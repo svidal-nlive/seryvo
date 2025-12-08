@@ -340,6 +340,15 @@ export type TicketCategory =
   | 'safety_incident'
   | 'other';
 
+export interface TicketMessage {
+  id: string;
+  sender_id: string;
+  sender_name: string;
+  message: string;
+  is_internal: boolean;
+  created_at: IsoDateTime;
+}
+
 export interface SupportTicket {
   ticket_id: UUID;
   booking_id?: UUID;
@@ -358,6 +367,9 @@ export interface SupportTicket {
   internal_notes?: string[];
 
   assignee_id?: UUID;
+  assignee_name?: string;
+  
+  messages?: TicketMessage[];
 }
 
 // ---- Legacy Demo Compatibility Layer -------------------------------------
@@ -657,4 +669,48 @@ export interface Surcharge {
   service_types: ServiceTypeCode[];
   created_at: IsoDateTime;
   updated_at: IsoDateTime;
+}
+
+// ─── Organization (Multi-Tenant) Types ───────────────────────────────────────
+
+export type OrgRole = 'owner' | 'admin' | 'member';
+
+export interface Organization {
+  id: UUID;
+  slug: string;
+  name: string;
+  settings?: Record<string, unknown>;
+  branding?: {
+    logo_url?: string;
+    primary_color?: string;
+    secondary_color?: string;
+  };
+  is_active: boolean;
+  created_at: IsoDateTime;
+  trial_ends_at?: IsoDateTime;
+}
+
+export interface OrganizationMember {
+  organization_id: UUID;
+  user_id: UUID;
+  user_email: string;
+  user_name: string;
+  role: OrgRole;
+  joined_at: IsoDateTime;
+}
+
+export interface OrganizationCreateRequest {
+  slug: string;
+  name: string;
+}
+
+export interface OrganizationUpdateRequest {
+  name?: string;
+  settings?: Record<string, unknown>;
+  branding?: {
+    logo_url?: string;
+    primary_color?: string;
+    secondary_color?: string;
+  };
+  is_active?: boolean;
 }
