@@ -100,6 +100,26 @@ Seryvo is a comprehensive ride-sharing platform that connects **clients**, **dri
 - 🔍 Audit logs and compliance
 - 🌍 Region and zone management
 
+### 🔒 Security Features
+
+| Feature | Description |
+|---------|-------------|
+| **Rate Limiting** | Per-endpoint limits with Redis backend (slowapi) |
+| **Security Headers** | CSP, X-XSS-Protection, X-Frame-Options, Referrer-Policy |
+| **Input Validation** | Password strength, phone format, coordinate range validation |
+| **Error Codes** | Standardized error codes (AUTH_001, BOOK_001, etc.) |
+| **Sensitive Data Filtering** | Production logging that redacts passwords, tokens, OTPs |
+| **CORS Configuration** | Configurable allowed origins |
+| **JWT Authentication** | Secure token-based auth with refresh tokens |
+
+### 🏢 Multi-Tenancy Ready
+
+The platform includes organization support for SaaS deployment:
+- Organization entity with branding (logo, colors)
+- User membership across multiple organizations
+- Per-organization data isolation
+- Subscription tier support
+
 ---
 
 ## 🏗️ Architecture
