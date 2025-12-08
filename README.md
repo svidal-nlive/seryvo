@@ -13,6 +13,8 @@
 
 [Live Demo](https://seryvo.vectorhost.net) • [API Docs](https://seryvo.vectorhost.net/docs) • [Features](#-features) • [Quick Start](#-quick-start)
 
+[![GitHub](https://img.shields.io/badge/GitHub-svidal--nlive%2Fseryvo-black?style=flat-square&logo=github)](https://github.com/svidal-nlive/seryvo)
+
 </div>
 
 ---
@@ -45,9 +47,10 @@ Seryvo is a comprehensive ride-sharing platform that connects **clients**, **dri
 
 - **🚀 Production Ready** - Deployed and running in production
 - **💰 Cost Effective** - Uses free-tier services (Stripe Test, Resend, WebPush)
-- **🔐 Secure** - JWT authentication, role-based access control (RBAC)
+- **🔐 Secure** - JWT auth, RBAC, rate limiting, security headers (CSP, XSS, HSTS)
 - **📱 Real-time** - WebSocket support for live updates
 - **🌍 Scalable** - Docker-based microservices architecture
+- **🏢 Multi-tenant Ready** - Organization support for SaaS deployment
 
 ---
 
@@ -62,6 +65,9 @@ Seryvo is a comprehensive ride-sharing platform that connects **clients**, **dri
 | **Payment Processing** | Stripe integration (Test + Production ready) |
 | **Notifications** | Email (Resend) + Push (WebPush) notifications |
 | **OTP Authentication** | Email-based verification codes |
+| **Rate Limiting** | Per-endpoint limits with Redis backend |
+| **Security Headers** | CSP, XSS protection, clickjacking prevention |
+| **Organizations** | Multi-tenant support for SaaS deployment |
 
 ### For Clients
 - 📍 Book rides (ASAP or scheduled)
@@ -162,7 +168,7 @@ Seryvo is a comprehensive ride-sharing platform that connects **clients**, **dri
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/seryvo.git
+git clone https://github.com/svidal-nlive/seryvo.git
 cd seryvo
 ```
 
@@ -170,17 +176,23 @@ cd seryvo
 
 ```bash
 # Copy example environment file
-cp backend/.env.example backend/.env
+cp .env.example .env
 
 # Edit with your settings
-nano backend/.env
+nano .env
 ```
 
 **Required Settings:**
 ```env
 # Database
-DATABASE_URL=postgresql+asyncpg://seryvo:yourpassword@db:5432/seryvo
-SECRET_KEY=your-super-secret-key-min-32-chars
+DB_USER=seryvo
+DB_PASSWORD=your-strong-password-here
+DB_NAME=seryvo
+
+# Security
+SECRET_KEY=your-super-secret-key-min-32-chars  # Generate: openssl rand -hex 32
+DEBUG=false
+DEMO_MODE=true
 
 # Stripe (get from https://dashboard.stripe.com/test/apikeys)
 STRIPE_PUBLISHABLE_KEY=pk_test_...
@@ -215,15 +227,39 @@ docker compose -f docker-compose.prod.yml up -d
 | **ReDoc** | http://localhost:8000/redoc |
 | **Health Check** | http://localhost:8000/health |
 
-### 5. Demo Credentials
+### 5. First-Time Setup (Admin Creation)
 
-The platform seeds demo accounts automatically:
+On first launch, the platform requires admin setup. No demo accounts are seeded by default.
 
+**Option A: Web Setup Wizard**
+1. Visit the web app at http://localhost:5173
+2. You'll see the "First-Time Setup" screen
+3. Enter your admin email, password, and name
+4. Click "Create Admin Account"
+
+**Option B: API Setup**
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/setup \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "admin@yourcompany.com",
+    "password": "YourSecurePassword123!",
+    "full_name": "Admin User"
+  }'
+```
+
+> **Note**: The first user to register automatically becomes the platform admin. This endpoint is disabled after the first admin is created.
+
+**Optional: Seed Demo Data**
+```bash
+docker compose exec seryvo-backend python seed.py
+```
+This creates demo users:
 | Role | Email | Password |
 |------|-------|----------|
-| **Admin** | admin@seryvo.demo | Admin123! |
-| **Driver** | driver.test@seryvo.demo | TestDriver123! |
-| **Client** | client.test@seryvo.demo | TestClient123! |
+| **Admin** | admin@seryvo.demo | demo123 |
+| **Driver** | driver@seryvo.demo | demo123 |
+| **Client** | client@seryvo.demo | demo123 |
 
 ---
 
@@ -479,10 +515,12 @@ curl -X GET https://api.seryvo.com/api/v1/users/me \
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
+| `/api/v1/auth/setup` | POST | First-time admin setup |
+| `/api/v1/auth/setup-status` | GET | Check if setup is complete |
 | `/api/v1/auth/register` | POST | Register new user |
 | `/api/v1/auth/login` | POST | User login |
-| `/api/v1/auth/otp/send` | POST | Request OTP |
-| `/api/v1/auth/otp/verify` | POST | Verify OTP |
+| `/api/v1/auth/password-reset` | POST | Request password reset OTP |
+| `/api/v1/auth/password-reset/verify` | POST | Verify reset OTP |
 | `/api/v1/bookings` | POST | Create booking |
 | `/api/v1/bookings/{id}` | GET | Get booking details |
 | `/api/v1/drivers/toggle-availability` | POST | Toggle driver status |
@@ -513,9 +551,13 @@ Interactive API documentation available at:
 | `STRIPE_PUBLISHABLE_KEY` | ✅ | Stripe public key |
 | `RESEND_API_KEY` | ✅ | Resend email API key |
 | `RESEND_FROM_EMAIL` | ✅ | From email address |
-| `VAPID_PUBLIC_KEY` | ✅ | WebPush public key |
-| `VAPID_PRIVATE_KEY` | ✅ | WebPush private key |
-| `VAPID_MAILTO` | ✅ | WebPush contact email |
+| `VAPID_PUBLIC_KEY` | ❌ | WebPush public key |
+| `VAPID_PRIVATE_KEY` | ❌ | WebPush private key |
+| `VAPID_MAILTO` | ❌ | WebPush contact email |
+| `REDIS_URL` | ❌ | Redis connection (default: redis://seryvo-redis:6379) |
+| `RATE_LIMIT_ENABLED` | ❌ | Enable rate limiting (default: true) |
+| `RATE_LIMIT_DEFAULT` | ❌ | Default rate limit (default: 100/minute) |
+| `RATE_LIMIT_AUTH` | ❌ | Auth endpoint limit (default: 20/minute) |
 
 ### Generate VAPID Keys
 
@@ -566,13 +608,28 @@ volumes:
 
 ### Production Checklist
 
+**Security**
 - [ ] Set `DEBUG=false`
-- [ ] Use strong `SECRET_KEY` (32+ random chars)
+- [ ] Use strong `SECRET_KEY` (generate with `openssl rand -hex 32`)
 - [ ] Configure SSL/TLS (via Traefik or nginx)
+- [ ] Verify rate limiting is enabled (`RATE_LIMIT_ENABLED=true`)
+- [ ] Review security headers in responses (CSP, XSS, HSTS)
+
+**Infrastructure**
 - [ ] Set up database backups
-- [ ] Configure monitoring (health checks)
+- [ ] Configure monitoring (health checks at `/health`)
+- [ ] Set up Redis for rate limiting and caching
+- [ ] Configure log aggregation (logs are JSON-formatted in production)
+
+**Services**
 - [ ] Switch Stripe to production keys
-- [ ] Verify domain in Resend
+- [ ] Verify domain in Resend for email delivery
+- [ ] Generate production VAPID keys for push notifications
+
+**First Launch**
+- [ ] Create admin account via `/api/v1/auth/setup` or web wizard
+- [ ] Configure pricing rules in admin dashboard
+- [ ] Set up service regions and zones
 
 ---
 
@@ -582,7 +639,7 @@ volumes:
 
 ```bash
 # Clone repo
-git clone https://github.com/yourusername/seryvo.git
+git clone https://github.com/svidal-nlive/seryvo.git
 cd seryvo
 
 # Create virtual environment
@@ -611,15 +668,25 @@ uvicorn app.main:app --reload
 seryvo/
 ├── backend/
 │   ├── app/
-│   │   ├── api/           # API endpoints
-│   │   ├── core/          # Business logic, services
-│   │   ├── models/        # Database models
+│   │   ├── api/           # API endpoints (auth, bookings, drivers, etc.)
+│   │   ├── core/          # Config, security, rate limiting, errors
+│   │   ├── models/        # SQLAlchemy models
 │   │   └── schemas/       # Pydantic schemas
 │   ├── alembic/           # Database migrations
 │   ├── requirements.txt
 │   └── Dockerfile
+├── frontend/
+│   ├── src/
+│   │   ├── components/    # React components
+│   │   ├── contexts/      # Auth, theme contexts
+│   │   ├── services/      # API clients
+│   │   ├── types/         # TypeScript types
+│   │   └── views/         # Page components
+│   └── package.json
+├── docker/                 # Dockerfiles
 ├── docs/                   # Documentation
 ├── docker-compose.yml
+├── overview-revision.md    # Architecture reference
 └── README.md
 ```
 
@@ -669,6 +736,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 **Built with ❤️ by the Seryvo Team**
 
-[Report Bug](https://github.com/yourusername/seryvo/issues) • [Request Feature](https://github.com/yourusername/seryvo/issues)
+[Report Bug](https://github.com/svidal-nlive/seryvo/issues) • [Request Feature](https://github.com/svidal-nlive/seryvo/issues)
 
 </div>
